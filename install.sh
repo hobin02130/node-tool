@@ -85,8 +85,88 @@ function get_latest_release_url() {
         echo "请检查 Release 中是否存在该架构的压缩包。"
         exit 1
     fi
+    
+    # 添加输出链接，并添加用户反馈
+    echo -e "${YELLOW}--- 正在从 GitHub Releases 获取最新下载链接 ---${NC}"
+    echo -e "✅ 成功获取最新版本链接！"
+    echo -e "版本: $(echo "$RELEASE_INFO" | jq -r .tag_name)"
+    
     echo "$LATEST_URL"
 }
+
+# ---------------------------------------------------------
+# 辅助函数：核心安装/更新逻辑 (下载、验证、替换)
+# ---------------------------------------------------------
+function core_install_logic() {
+    # 临时工作目录，用于下载和验证
+    local TEMP_DIR="$INSTALL_DIR/temp_update" 
+
+    # 1. 获取下载链接
+    DOWNLOAD_URL=$(get_latest_release_url)
+
+    if [ -z "$DOWNLOAD_URL" ]; then
+        echo -e "${RED}错误: 无法获取下载链接。${NC}"
+        return 1
+    fi
+
+    # 2. 下载到临时目录
+    echo -e "${YELLOW}--- 正在下载文件到临时目录...${NC}"
+    mkdir -p "$TEMP_DIR"
+    cd "$TEMP_DIR" || return 1
+    rm -f package.zip
+
+    # 静默下载
+    wget -O package.zip "$DOWNLOAD_URL" > /dev/null 2>&1
+    if [ $? -ne 0 ]; then
+        echo -e "${RED}下载失败。请检查网络连接。${NC}"
+        cd "$INSTALL_DIR" # 返回主目录
+        rm -rf "$TEMP_DIR" # 清理临时目录
+        return 1
+    fi
+
+    # 3. 解压和验证
+    echo -e "${YELLOW}--- 正在解压并验证新文件...${NC}"
+    unzip -o package.zip > /dev/null
+    
+    # 查找新的二进制文件
+    FOUND_BIN=$(find . -name "$BINARY_NAME" -type f | head -n 1)
+
+    if [ -n "$FOUND_BIN" ]; then
+        echo -e "✅ 新的二进制文件验证成功。"
+    else
+        echo -e "${RED}错误: 在压缩包中未找到新的二进制文件 '$BINARY_NAME'。${NC}"
+        cd "$INSTALL_DIR"
+        rm -rf "$TEMP_DIR"
+        return 1
+    fi
+    
+    # 4. 替换旧文件 (在替换前停止服务)
+    echo -e "${YELLOW}--- 正在替换旧文件...${NC}"
+    
+    # 停止服务 (如果服务已配置)
+    if [ -f "/etc/systemd/system/${SERVICE_NAME}.service" ]; then
+        echo -e "${CYAN}停止 NodeTool 服务...${NC}"
+        $CMD_PREFIX systemctl stop $SERVICE_NAME > /dev/null 2>&1
+    fi
+
+    # 移动新文件到安装目录 (处理子目录结构)
+    if [ "$(dirname "$FOUND_BIN")" != "." ]; then
+        # 移动子目录中的所有内容到临时目录根目录
+        mv "$(dirname "$FOUND_BIN")"/* "$TEMP_DIR/"
+    fi
+    
+    # 移动新的二进制文件到安装目录
+    mv "$TEMP_DIR/$BINARY_NAME" "$INSTALL_DIR/$BINARY_NAME"
+    chmod +x "$INSTALL_DIR/$BINARY_NAME"
+    
+    # 5. 清理
+    cd "$INSTALL_DIR"
+    rm -rf "$TEMP_DIR"
+    echo -e "${GREEN}🎉 核心二进制文件已更新。${NC}"
+
+    return 0
+}
+
 
 # ---------------------------------------------------------
 # 辅助函数：检查并卸载旧版本 (Clean Install)
@@ -153,15 +233,37 @@ else
     CMD_PREFIX=""
 fi
 
-# 显示服务状态
+# 显示服务状态 (已优化，提供简洁状态，详细状态可选)
 function show_status() {
-    echo -e "\n${CYAN}--- ${SERVICE_NAME} 运行状态 ---${NC}"
+    echo -e "\n${CYAN}--- ${SERVICE_NAME} 运行状态概览 ---${NC}"
+    
     if command -v systemctl &> /dev/null; then
+        # 简洁状态：是否激活？
+        if $CMD_PREFIX systemctl is-active $SERVICE_NAME &> /dev/null; then
+            echo -e "状态: ${GREEN}● 正在运行${NC}"
+        else
+            echo -e "状态: ${RED}○ 已停止${NC}"
+        fi
+        
+        # 详细状态：提供查看详细日志的入口
+        echo -e "日志/详细状态: ${CYAN}nt status detailed${NC} 或 ${CYAN}nt log${NC}"
+        
+    else
+        # 非 systemd 系统的备用显示
+        echo -e "${RED}Systemctl 命令不可用。${NC}"
+        echo "进程状态: $($CMD_PREFIX pgrep -f ${INSTALL_DIR}/NodeTool)"
+    fi
+    echo "----------------------------------"
+}
+
+# 显示详细 Systemd 状态
+function show_detailed_status() {
+    echo -e "\n${CYAN}--- ${SERVICE_NAME} 详细状态 (systemctl status) ---${NC}"
+    if command -v systemctl &> /dev/null; then
+        # 使用 --no-pager 或 less/more 来防止输出过多刷屏
         $CMD_PREFIX systemctl status $SERVICE_NAME --no-pager
     else
         echo -e "${RED}Systemctl 命令不可用。${NC}"
-        # 备用显示进程状态
-        echo "进程状态: $($CMD_PREFIX pgrep -f ${INSTALL_DIR}/NodeTool)"
     fi
     echo "----------------------------------"
 }
@@ -171,10 +273,10 @@ function uninstall() {
     read -r -p "警告：您确定要彻底卸载 NodeTool 吗？(这将删除服务和安装目录：$INSTALL_DIR) [y/N] " response
     if [[ "$response" =~ ^([yY])$ ]]; then
         echo -e "${YELLOW}停止并禁用服务...${NC}"
-        $CMD_PREFIX systemctl stop $SERVICE_NAME 2>/dev/null
-        $CMD_PREFIX systemctl disable $SERVICE_NAME 2>/dev/null
+        $CMD_PREFIX systemctl stop $SERVICE_NAME > /dev/null 2>&1 # 静默停止
+        $CMD_PREFIX systemctl disable $SERVICE_NAME > /dev/null 2>&1 # 静默禁用
         $CMD_PREFIX rm -f /etc/systemd/system/${SERVICE_NAME}.service 2>/dev/null
-        $CMD_PREFIX systemctl daemon-reload 2>/dev/null
+        $CMD_PREFIX systemctl daemon-reload > /dev/null 2>&1
         
         echo -e "${YELLOW}删除安装目录 $INSTALL_DIR...${NC}"
         rm -rf $INSTALL_DIR
@@ -189,6 +291,35 @@ function uninstall() {
     fi
 }
 
+# 核心更新功能
+function update() {
+    # 假设 install.sh 脚本位于用户的主目录下
+    INSTALL_SCRIPT="$HOME/install.sh" 
+    
+    if [ ! -f "$INSTALL_SCRIPT" ]; then
+        echo -e "${RED}错误: 未找到主安装脚本 $INSTALL_SCRIPT，无法执行核心更新。${NC}"
+        echo "请确保 install.sh 文件在您的 $HOME 目录下。"
+        return 1
+    fi
+    
+    echo -e "${CYAN}执行核心更新流程...${NC}"
+    
+    # 警告：此命令将执行 install.sh 脚本中的 core_install_logic 函数。
+    # 假设 install.sh 脚本的结构已经被修改为仅执行 core_install_logic 并退出。
+    # 运行 install.sh 脚本 (它现在只执行 core_install_logic)
+    
+    $CMD_PREFIX bash "$INSTALL_SCRIPT"
+    
+    if [ $? -eq 0 ]; then
+        echo -e "${YELLOW}重新启动 NodeTool 服务...${NC}"
+        $CMD_PREFIX systemctl restart $SERVICE_NAME > /dev/null 2>&1
+        show_status
+    else
+        echo -e "${RED}更新失败，请检查 $INSTALL_SCRIPT 脚本的输出。${NC}"
+    fi
+}
+
+
 # ---------------------------------------------------------
 # 主控制逻辑：支持参数或菜单
 # ---------------------------------------------------------
@@ -196,69 +327,86 @@ if [ -z "$1" ]; then
     # 菜单模式
     while true; do
         echo -e "\n${GREEN}--- NodeTool 控制台 ---${NC}"
-        echo -e "1) ${CYAN}查看服务状态 (status)${NC}"
+        echo -e "1) ${CYAN}查看状态 (status)${NC}"
         echo -e "2) ${CYAN}启动服务 (start)${NC}"
         echo -e "3) ${CYAN}重启服务 (restart)${NC}"
         echo -e "4) ${CYAN}停止服务 (stop)${NC}"
-        echo -e "5) ${RED}完全卸载 (uninstall)${NC}"
+        echo -e "5) ${CYAN}更新程序 (update)${NC}" # 新增更新选项
+        echo -e "6) ${RED}查看日志 (log)${NC}"
+        echo -e "7) ${RED}完全卸载 (uninstall)${NC}"
         echo -e "0) ${YELLOW}退出面板${NC}"
-        read -r -p "请输入选项 [0-5]: " choice
+        read -r -p "请输入选项 [0-7]: " choice
         
         case "$choice" in
             1) show_status ;;
             2) 
                 echo -e "${CYAN}正在启动 NodeTool...${NC}"
-                $CMD_PREFIX systemctl start $SERVICE_NAME
-                sleep 1 # 短暂等待
+                $CMD_PREFIX systemctl start $SERVICE_NAME > /dev/null 2>&1
+                sleep 1
                 show_status
                 ;;
             3) 
                 echo -e "${CYAN}正在重启 NodeTool...${NC}"
-                $CMD_PREFIX systemctl restart $SERVICE_NAME
-                sleep 1 # 短暂等待
+                $CMD_PREFIX systemctl restart $SERVICE_NAME > /dev/null 2>&1
+                sleep 1
                 show_status
                 ;;
             4) 
                 echo -e "${CYAN}正在停止 NodeTool...${NC}"
-                $CMD_PREFIX systemctl stop $SERVICE_NAME
-                sleep 1 # 短暂等待
+                $CMD_PREFIX systemctl stop $SERVICE_NAME > /dev/null 2>&1
+                sleep 1
                 show_status
                 ;;
-            5) uninstall; break ;;
+            5) update ;; # 调用 update 函数
+            6)
+                echo -e "${CYAN}--- NodeTool 实时日志 (Ctrl+C 退出) ---${NC}"
+                $CMD_PREFIX journalctl -u $SERVICE_NAME -f
+                ;;
+            7) uninstall; break ;;
             0) echo -e "${CYAN}退出控制面板。${NC}"; break ;;
             *) echo -e "${RED}输入无效，请重新选择。${NC}" ;;
         esac
     done
 else
-    # 参数模式 (兼容旧命令)
+    # 参数模式 (兼容旧命令，并新增 detailed/log/update)
     case "$1" in
         start)
             echo -e "${CYAN}正在启动 NodeTool...${NC}"
-            $CMD_PREFIX systemctl start $SERVICE_NAME
+            $CMD_PREFIX systemctl start $SERVICE_NAME > /dev/null 2>&1
             sleep 2
             show_status
             ;;
         stop)
             echo -e "${CYAN}正在停止 NodeTool...${NC}"
-            $CMD_PREFIX systemctl stop $SERVICE_NAME
+            $CMD_PREFIX systemctl stop $SERVICE_NAME > /dev/null 2>&1
             sleep 2
             show_status
             ;;
         restart)
             echo -e "${CYAN}正在重启 NodeTool...${NC}"
-            $CMD_PREFIX systemctl restart $SERVICE_NAME
+            $CMD_PREFIX systemctl restart $SERVICE_NAME > /dev/null 2>&1
             sleep 2
             show_status
             ;;
         status)
             show_status
             ;;
+        update) # 新增 update 命令
+            update
+            ;;
+        detailed | status-detailed)
+            show_detailed_status
+            ;;
+        log)
+            echo -e "${CYAN}--- NodeTool 实时日志 (Ctrl+C 退出) ---${NC}"
+            $CMD_PREFIX journalctl -u $SERVICE_NAME -f
+            ;;
         uninstall)
             uninstall
             ;;
         *)
             echo -e "${RED}NodeTool 控制台${NC}"
-            echo -e "${CYAN}用法: nt [start | stop | restart | status | uninstall]${NC}"
+            echo -e "${CYAN}用法: nt [start | stop | restart | status | update | detailed | log | uninstall]${NC}"
             echo -e "例如: nt status"
             ;;
     esac
@@ -269,6 +417,8 @@ NT_SCRIPT_EOF
     $CMD_PREFIX chmod +x $CONTROL_SCRIPT_PATH
     echo -e "✅ 'nt' 命令已安装到 $CONTROL_SCRIPT_PATH"
 }
+
+
 # ---------------------------------------------------------
 # 主脚本开始
 # ---------------------------------------------------------
@@ -281,81 +431,70 @@ check_and_uninstall_if_exists
 
 # 1. 检查依赖
 echo -e "${YELLOW} 检查系统环境...${NC}"
-DEPENDENCIES=("unzip" "curl" "wget" "pgrep" "jq")
+DEPENDENCIES=("unzip" "curl" "wget" "pgrep" "jq" "timeout") # 🟢 添加 timeout
+INSTALL_TIMEOUT=120 # 设置超时时间为 60 秒
+
 for cmd in "${DEPENDENCIES[@]}"; do
     if ! command -v $cmd &> /dev/null; then
-        echo "未找到 $cmd，正在尝试自动安装..."
+        echo -e "${YELLOW}未找到 '$cmd'，正在安装...${NC}"
         INSTALL_SUCCESS=0
+        
+        # 使用临时变量存储安装命令
+        INSTALL_CMD=""
+        
         if [ -x "$(command -v apt-get)" ]; then
-            # 尝试使用 apt-get 安装
+            # 尝试使用 apt-get 安装。注意：update也需要静默处理。
             $CMD_PREFIX apt-get update > /dev/null 2>&1
-            $CMD_PREFIX apt-get install -y $cmd
-            INSTALL_SUCCESS=$?
+            INSTALL_CMD="$CMD_PREFIX apt-get install -y $cmd"
         elif [ -x "$(command -v yum)" ]; then
             # 尝试使用 yum 安装
-            $CMD_PREFIX yum install -y $cmd
-            INSTALL_SUCCESS=$?
+            INSTALL_CMD="$CMD_PREFIX yum install -y $cmd"
         fi
         
-        if [ $INSTALL_SUCCESS -ne 0 ]; then
-            echo -e "${RED}错误: 无法自动安装 $cmd。请手动运行 'apt install $cmd' 或 'yum install $cmd'。${NC}"
+        if [ -n "$INSTALL_CMD" ]; then
+            # 设置超时，并将所有输出重定向到 /dev/null
+            if command -v timeout &> /dev/null; then
+                # 如果系统支持 timeout 命令，则使用它
+                timeout $INSTALL_TIMEOUT $INSTALL_CMD > /dev/null 2>&1
+                INSTALL_SUCCESS=$?
+            else
+                # 如果不支持 timeout，则仅静默安装
+                $INSTALL_CMD > /dev/null 2>&1
+                INSTALL_SUCCESS=$?
+                # 注意：此处无法实现超时退出
+            fi
+        else
+            # 如果没有找到包管理器，直接标记失败
+            INSTALL_SUCCESS=1
+        fi
+        
+        # 检查安装结果
+        if [ $INSTALL_SUCCESS -eq 124 ]; then
+            # 124 是 timeout 命令的退出码，表示命令超时
+            echo -e "${RED}❌ 错误: '$cmd' 安装超时 (${INSTALL_TIMEOUT} 秒)。请检查网络或手动安装。${NC}"
+            exit 1
+        elif [ $INSTALL_SUCCESS -ne 0 ]; then
+            # 检查是否有权限执行 sudo
+            if [ -n "$CMD_PREFIX" ] && [ "$EUID" -ne 0 ]; then
+                echo -e "${RED}错误: 无法自动安装 '$cmd' (退出码: $INSTALL_SUCCESS)。请确认您具有正确的 sudo 权限。${NC}"
+            else
+                echo -e "${RED}❌ 错误: 无法自动安装 '$cmd' (退出码: $INSTALL_SUCCESS)。请手动运行相应的安装命令。${NC}"
+            fi
             exit 1
         fi
+        
+        echo -e "✅ '$cmd' 安装成功。"
     fi
 done
 
-# 2. 获取下载链接
-DOWNLOAD_URL=$(get_latest_release_url)
-
-if [ -z "$DOWNLOAD_URL" ]; then
-    # 错误处理，如果链接为空则退出
-    echo -e "${RED}错误: 无法获取下载链接。${NC}"
-    exit 1
-fi
-
-# 3. 下载
-echo -e "${YELLOW} 正在下载文件...${NC}"
-mkdir -p "$INSTALL_DIR"
-cd "$INSTALL_DIR" || exit
-rm -f package.zip
-
-# 尝试使用 wget 下载
-wget -O package.zip "$DOWNLOAD_URL"
-if [ $? -ne 0 ]; then
-    echo -e "${RED}下载失败。请检查网络连接或 GitHub API 限制。${NC}"
-    exit 1
-fi
-
-# 4. 安装
+# 2. 统一执行核心安装逻辑 (下载、解压、替换)
 echo -e "${YELLOW} 正在安装...${NC}"
-
-# 4. 安装
-echo -e "${YELLOW} 正在安装...${NC}"
-
-# 确保解压成功
-unzip -o package.zip > /dev/null
+# 注意：首次安装时，目标目录可能不存在，core_install_logic会负责创建
+core_install_logic
 if [ $? -ne 0 ]; then
-    echo -e "${RED}错误: 解压文件失败！请确保 'unzip' 工具已安装。${NC}"
+    echo -e "${RED}安装失败，退出。${NC}"
     exit 1
 fi
-
-if [ ! -f "./$BINARY_NAME" ]; then
-    # 尝试在子目录中查找 NodeTool
-    FOUND_BIN=$(find . -name "$BINARY_NAME" -type f | head -n 1)
-    if [ -n "$FOUND_BIN" ]; then
-        # 移动子目录中的所有内容到安装根目录
-        mv "$(dirname "$FOUND_BIN")"/* .
-    else
-        echo -e "${RED}错误: 在压缩包中未找到二进制文件 '$BINARY_NAME'。${NC}"
-        echo "请检查压缩包内容是否包含名为 '$BINARY_NAME' 的可执行文件。"
-        exit 1
-    fi
-fi
-
-# 删除下载的压缩包
-rm -f package.zip
-
-chmod +x "$BINARY_NAME"
 
 # 5. 配置 Systemd 和控制脚本
 echo -e "${YELLOW} 正在设置自启与控制脚本...${NC}"
@@ -401,7 +540,7 @@ else
     nohup ./$BINARY_NAME > "$LOG_FILE" 2>&1 &
 fi
 
-# 缩短等待时间
+# 等待时间
 echo "正在等待服务启动 (3秒)..."
 sleep 3
 
@@ -466,7 +605,7 @@ else
     # 额外调试：检查依赖库
     echo -e "${YELLOW}[调试] 检查二进制文件依赖:${NC}"
     if command -v ldd &> /dev/null; then
-        ldd "./$BINARY_NAME" | grep "not found"
+        ldd "$INSTALL_DIR/$BINARY_NAME" | grep "not found" # 修正了路径，确保不在 temp_update 目录
         if [ $? -eq 0 ]; then
             echo -e "${RED}发现缺失的系统库！${NC}"
         else
@@ -483,7 +622,7 @@ IP=$(curl -s ifconfig.me)
 echo -e "${GREEN}=============================================${NC}"
 echo -e "${GREEN}🎉 NodeTool 正在运行！${NC}"
 echo -e "---------------------------------------------"
-echo -e "管理命令: ${CYAN}nt [start|stop|restart|status|uninstall]${NC}"
+echo -e "管理命令: ${CYAN}nt [start|stop|restart|status|update|uninstall|log|detailed]${NC}"
 echo -e "日志查看: ${CYAN}${CMD_PREFIX} journalctl -u nodetool -f${NC}" # <-- 使用 CMD_PREFIX
 echo -e "公网地址:   ${YELLOW}http://$IP:$PORT${NC}"
 echo -e "${GREEN}=============================================${NC}"
