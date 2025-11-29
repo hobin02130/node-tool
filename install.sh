@@ -109,16 +109,16 @@ function core_install_logic() {
         return 1
     fi
 
-    # 2. 下载到临时目录
+# 2. 下载到临时目录
     echo -e "${YELLOW}--- 正在下载文件到临时目录...${NC}"
     mkdir -p "$TEMP_DIR"
     cd "$TEMP_DIR" || return 1
     rm -f package.zip
 
-    # 静默下载
-    wget -O package.zip "$DOWNLOAD_URL" > /dev/null 2>&1
+    curl -L --retry 3 --fail -o package.zip "$DOWNLOAD_URL" > /dev/null 2>&1
+    
     if [ $? -ne 0 ]; then
-        echo -e "${RED}下载失败。请检查网络连接。${NC}"
+        echo -e "${RED}下载失败。请检查网络连接或 GitHub API 限制。${NC}"
         cd "$INSTALL_DIR" # 返回主目录
         rm -rf "$TEMP_DIR" # 清理临时目录
         return 1
