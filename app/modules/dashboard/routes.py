@@ -46,7 +46,7 @@ def index():
                            komari_url=komari_url,
                            now=datetime.now())
 
-# 🚨 API: 删除节点
+# API: 删除节点
 @bp.route('/api/delete_node', methods=['POST'])
 @login_required
 def delete_node_api():
@@ -67,7 +67,7 @@ def delete_node_api():
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
-# 🚨 API：更新节点详情
+# API：更新节点详情
 @bp.route('/api/update_node', methods=['POST'])
 @login_required
 def update_node_api():
@@ -90,4 +90,5 @@ def update_node_api():
             return jsonify({'status': 'error', 'message': '数据库更新失败'}), 500
             
     except Exception as e:
+
         return jsonify({'status': 'error', 'message': str(e)}), 500
