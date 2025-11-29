@@ -54,7 +54,7 @@ curl -fsSL https://raw.githubusercontent.com/hobin02130/node-tool/main/install.s
 * **自定义规则列表**: 模板内置有mihomo官方分流规则，且添加直连和自定义代理节点分流规则。
 * **部署简单**: 可直接二进制文件启动
 * **多端支持**: 完美win、linux及多架构。
-* **docker**: 计划支持
+* **Docker**: 计划支持
 
 ---
 
