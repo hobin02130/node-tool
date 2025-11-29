@@ -25,31 +25,31 @@ EXTERNAL_ASSETS = [
 
 def clean_dirs():
     """清理构建产生的临时文件夹"""
-    print(f"🧹 清理旧的构建文件...")
+    print(f"[Clean] 清理旧的构建文件...")
     for d in [DIST_DIR, BUILD_DIR, RELEASE_DIR]:
         if os.path.exists(d):
             shutil.rmtree(d, ignore_errors=True)
 
 def run_pyinstaller():
     """运行 PyInstaller"""
-    print(f"📦 开始使用 PyInstaller 打包 ({platform.system()})...")
+    print(f"[Build] 开始使用 PyInstaller 打包 ({platform.system()})...")
     
     # 检查 spec 文件是否存在
     if not os.path.exists(SPEC_FILE):
-        print(f"❌ 错误: 找不到 {SPEC_FILE}，请先生成 spec 文件。")
+        print(f"[Error] 错误: 找不到 {SPEC_FILE}，请先生成 spec 文件。")
         sys.exit(1)
 
     # 运行 PyInstaller 命令
     try:
         subprocess.check_call([sys.executable, "-m", "PyInstaller", SPEC_FILE, "--clean", "-y"])
-        print("✅ PyInstaller 打包完成")
+        print("[Success] PyInstaller 打包完成")
     except subprocess.CalledProcessError:
-        print("❌ PyInstaller 打包失败")
+        print("[Error] PyInstaller 打包失败")
         sys.exit(1)
 
 def organize_release():
     """整理发布文件夹：复制 exe 和外部资源"""
-    print(f"📂 正在整理发布文件到 '{RELEASE_DIR}'...")
+    print(f"[Organize] 正在整理发布文件到 '{RELEASE_DIR}'...")
     
     if not os.path.exists(RELEASE_DIR):
         os.makedirs(RELEASE_DIR)
@@ -62,7 +62,7 @@ def organize_release():
     dst_exe = os.path.join(RELEASE_DIR, exe_name)
 
     if not os.path.exists(src_exe):
-        print(f"❌ 错误: 在 dist 目录找不到生成的文件: {src_exe}")
+        print(f"[Error] 错误: 在 dist 目录找不到生成的文件: {src_exe}")
         sys.exit(1)
 
     # 2. 移动可执行文件
@@ -73,7 +73,7 @@ def organize_release():
     for src, dst_folder in EXTERNAL_ASSETS:
         # 构建完整源路径
         if not os.path.exists(src):
-            print(f"   ⚠️ 警告: 资源未找到，跳过: {src}")
+            print(f"   [Warning] 警告: 资源未找到，跳过: {src}")
             continue
 
         final_dst = os.path.join(RELEASE_DIR, dst_folder)
@@ -95,7 +95,7 @@ def organize_release():
 
 def make_archive():
     """压缩发布文件夹"""
-    print("🗜️ 正在创建压缩包...")
+    print("[Compress] 正在创建压缩包...")
     
     # 架构名称 (例如 amd64, arm64, win32)
     arch = platform.machine().lower()
@@ -105,7 +105,7 @@ def make_archive():
     # 切换目录以便压缩包内的路径整洁
     shutil.make_archive(os.path.join(".", zip_name.replace('.zip', '')), 'zip', RELEASE_DIR)
     
-    print(f"🎉 打包成功! 文件位于: {os.path.abspath(zip_name)}")
+    print(f"[Done] 打包成功! 文件位于: {os.path.abspath(zip_name)}")
 
 if __name__ == "__main__":
     clean_dirs()
