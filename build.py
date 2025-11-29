@@ -4,7 +4,7 @@ import subprocess
 import sys
 import platform
 import zipfile
-import glob  # 🟢 [新增] 用于搜索文件
+import glob
 
 # ---------------------------------------------------------
 # Configuration Area
@@ -26,37 +26,37 @@ EXTERNAL_ASSETS = [
 
 def clean_dirs():
     """Clean up temporary build directories"""
-    print(f"[Clean] Cleaning up old build files...")
+    print(f"[Clean] Cleaning up old build files...", flush=True)
     for d in [DIST_DIR, BUILD_DIR, RELEASE_DIR]:
         if os.path.exists(d):
             shutil.rmtree(d, ignore_errors=True)
 
 def run_pyinstaller():
     """Run PyInstaller"""
-    print(f"[Build] Starting PyInstaller build ({platform.system()})...")
+    print(f"[Build] Starting PyInstaller build ({platform.system()})...", flush=True)
     
     # Check if spec file exists
     if not os.path.exists(SPEC_FILE):
-        print(f"[Error] Error: {SPEC_FILE} not found. Please generate the spec file first.")
+        print(f"[Error] Error: {SPEC_FILE} not found. Please generate the spec file first.", flush=True)
         sys.exit(1)
 
     # Run PyInstaller command
     try:
-        subprocess.check_call([sys.executable, "-m", "PyInstaller", SPEC_FILE, "--clean", "-y"])
-        print("[Success] PyInstaller build completed")
+        # 🟢 [修改] 添加 --noupx 参数，防止 Windows Defender 误删生成的 exe
+        subprocess.check_call([sys.executable, "-m", "PyInstaller", SPEC_FILE, "--clean", "-y", "--noupx"])
+        print("[Success] PyInstaller build completed", flush=True)
     except subprocess.CalledProcessError:
-        print("[Error] PyInstaller build failed")
+        print("[Error] PyInstaller build failed", flush=True)
         sys.exit(1)
 
 def organize_release():
     """Organize release folder: copy exe and external assets"""
-    print(f"[Organize] Organizing release files to '{RELEASE_DIR}'...")
+    print(f"[Organize] Organizing release files to '{RELEASE_DIR}'...", flush=True)
     
     if not os.path.exists(RELEASE_DIR):
         os.makedirs(RELEASE_DIR)
 
     # 1. Determine the executable name automatically
-    # 🟢 [修改] 自动探测 dist 目录下的可执行文件，防止名字不匹配
     system_name = platform.system()
     
     found_exe = None
@@ -73,25 +73,25 @@ def organize_release():
             found_exe = os.path.join(DIST_DIR, potential_files[0])
 
     if not found_exe or not os.path.exists(found_exe):
-        print(f"[Error] Error: No executable file found in {DIST_DIR}")
+        print(f"[Error] Error: No executable file found in {DIST_DIR}", flush=True)
         # 列出 dist 目录内容方便调试
         if os.path.exists(DIST_DIR):
-            print(f"Content of {DIST_DIR}: {os.listdir(DIST_DIR)}")
+            print(f"Content of {DIST_DIR}: {os.listdir(DIST_DIR)}", flush=True)
         sys.exit(1)
         
     exe_filename = os.path.basename(found_exe)
-    print(f"   -> Found generated executable: {exe_filename}")
+    print(f"   -> Found generated executable: {exe_filename}", flush=True)
 
     # 2. Move executable
     dst_exe = os.path.join(RELEASE_DIR, exe_filename)
     shutil.copy2(found_exe, dst_exe)
-    print(f"   -> Copied executable to release folder")
+    print(f"   -> Copied executable to release folder", flush=True)
 
     # 3. Copy external assets (nodes folder, etc.)
     for src, dst_folder in EXTERNAL_ASSETS:
         # Check if source exists
         if not os.path.exists(src):
-            print(f"   [Warning] Warning: Asset not found, skipping: {src}")
+            print(f"   [Warning] Warning: Asset not found, skipping: {src}", flush=True)
             continue
 
         final_dst = os.path.join(RELEASE_DIR, dst_folder)
@@ -101,11 +101,11 @@ def organize_release():
             if os.path.exists(final_dst):
                 shutil.rmtree(final_dst)
             shutil.copytree(src, final_dst)
-            print(f"   -> Copied folder: {src} -> {dst_folder}/")
+            print(f"   -> Copied folder: {src} -> {dst_folder}/", flush=True)
         else:
             # If it's a file
             shutil.copy2(src, final_dst)
-            print(f"   -> Copied file: {src}")
+            print(f"   -> Copied file: {src}", flush=True)
 
     # 4. Set execution permissions for Linux
     if system_name != "Windows":
@@ -113,7 +113,7 @@ def organize_release():
 
 def make_archive():
     """Create archive for release"""
-    print("[Compress] Creating archive...")
+    print("[Compress] Creating archive...", flush=True)
     
     # Architecture name (e.g., amd64, arm64, win32)
     arch = platform.machine().lower()
@@ -123,7 +123,7 @@ def make_archive():
     # Change directory to make the archive path clean
     shutil.make_archive(os.path.join(".", zip_name.replace('.zip', '')), 'zip', RELEASE_DIR)
     
-    print(f"[Done] Build successful! File located at: {os.path.abspath(zip_name)}")
+    print(f"[Done] Build successful! File located at: {os.path.abspath(zip_name)}", flush=True)
 
 if __name__ == "__main__":
     clean_dirs()
