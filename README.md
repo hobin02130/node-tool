@@ -30,7 +30,6 @@ curl -fsSL https://raw.githubusercontent.com/hobin02130/node-tool/main/install.s
 ```
 ---
 
----
 
 ### 🖥️ 访问应用
 
