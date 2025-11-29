@@ -1,9 +1,12 @@
 name: Build and Release
 
-# 🟢 [修改] 触发条件：仅保留手动触发
-# 原来的 push 触发器已被删除，现在提交代码不会自动构建了
 on:
   workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Release Tag (e.g. v1.0.0)'
+        required: true
+        default: 'v1.0.0'
 
 jobs:
   # ----------------------------------------------------------------
@@ -33,9 +36,10 @@ jobs:
     - name: Upload Windows Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: Windows-Build
-        path: "*.zip"
-        retention-days: 5
+        name: NodeTool-Windows-amd64
+        # 🟢 [修改] 上传 release 文件夹。GitHub 会自动把它打包成 NodeTool-Windows-amd64.zip
+        path: release/
+        retention-days: 1
 
   # ----------------------------------------------------------------
   # 任务 2: Linux 构建 (AMD64 和 ARM64)
@@ -73,14 +77,65 @@ jobs:
 
     - name: Run Build and Extract
       run: |
+        echo "Current workspace: ${{ github.workspace }}"
+        # 🟢 [修改] 不再复制 zip，而是复制 release 文件夹
         docker run --rm --platform ${{ matrix.platform }} \
         -v "${{ github.workspace }}:/output" \
         node-tool-builder:latest \
-        sh -c "python build.py && cp *.zip /output/"
+        sh -c "python build.py && cp -r release /output/"
 
     - name: Upload Linux Artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: Linux-${{ matrix.arch }}-Build
-        path: "*.zip"
-        retention-days: 5
+        name: NodeTool-Linux-${{ matrix.arch }}
+        # 🟢 [修改] 上传 release 文件夹
+        path: release/
+        retention-days: 1
+
+  # ----------------------------------------------------------------
+  # 任务 3: 发布 Release
+  # ----------------------------------------------------------------
+  create-release:
+    needs: [build-windows, build-linux]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      
+    steps:
+    # 1. 下载 Artifacts (此时下载下来的是解压后的文件夹)
+    - name: Download All Artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: release_assets
+
+    # 2. 🟢 [核心] 重新打包为 Zip
+    # 由于下载下来的是文件夹，我们需要手动将每个文件夹压缩成 zip，以便发布到 Releases
+    - name: Zip Assets for Release
+      run: |
+        mkdir final_assets
+        cd release_assets
+        # 遍历所有下载的文件夹 (例如 NodeTool-Windows-amd64)
+        for dir in */; do
+            # 去掉末尾的斜杠
+            dirname=${dir%/}
+            echo "Zipping $dirname..."
+            # 进入文件夹进行压缩，这样解压时不会多一层父目录
+            cd "$dirname"
+            zip -r "../../final_assets/${dirname}.zip" .
+            cd ..
+        done
+        echo "Files to be released:"
+        ls -lh ../final_assets/
+
+    # 3. 创建 GitHub Release 并上传文件
+    - name: Create Release
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: ${{ github.event.inputs.tag_name }}
+        name: Release ${{ github.event.inputs.tag_name }}
+        draft: false
+        prerelease: false
+        files: final_assets/*.zip
+        generate_release_notes: true
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
