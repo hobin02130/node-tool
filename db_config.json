@@ -1,0 +1,11 @@
+{
+    "db_mode": "sqlite",
+    "sqlite_path": "app.db",
+    "psql_config": {
+        "host": "postgresql-xxxxx",
+        "port": "5432",
+        "user": "komari_db",
+        "password": "xxxxxxx",
+        "database": "komari_db"
+    }
+}

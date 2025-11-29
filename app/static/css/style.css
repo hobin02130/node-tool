@@ -1,0 +1,410 @@
+/* 全局样式表 - Node Tool
+   整合了侧边栏样式、动画效果及通用组件
+*/
+
+/* --- 1. 核心变量定义 --- */
+:root {
+    /* 侧边栏与布局变量 (来自 base.html) */
+    --sidebar-width: 260px;
+    --sidebar-collapsed-width: 76px;
+    --sidebar-bg: #ffffff;
+    --sidebar-border: #f0f0f5;
+    
+    /* 颜色系统 */
+    --primary-color: #007aff;
+    --nav-text-color: #555555;
+    --nav-hover-bg: #f5f7fa;
+    --nav-active-bg: #eef6ff;
+    --nav-active-color: #007aff;
+    --bg-color: #f9f9fc;  /* 页面背景色 */
+    --card-bg: #ffffff;   /* 卡片背景 */
+    
+    /* 动画设置 */
+    --transition-speed: 0.3s;
+    --transition-ease: cubic-bezier(0.25, 0.8, 0.25, 1);
+    
+    /* 通用样式 */
+    --radius: 12px;
+    --shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+}
+
+/* --- 2. 基础设置 & 动画控制 --- */
+* {
+    box-sizing: border-box;
+}
+
+/* 禁止动画类 (用于页面加载防止闪烁) */
+.no-transition, .no-transition * {
+    transition: none !important;
+    animation: none !important;
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background-color: var(--bg-color);
+    color: #1d1d1f;
+    margin: 0;
+    height: 100vh;
+    overflow-x: hidden; /* 防止动画过程中出现横向滚动条 */
+    line-height: 1.5;
+}
+
+/* 全局内容容器 */
+.container-fluid {
+    padding: 20px;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.app-wrapper {
+    display: flex;
+    height: 100vh;
+    width: 100%;
+}
+
+/* --- 3. 侧边栏样式 (Sidebar) --- */
+.sidebar {
+    width: var(--sidebar-width);
+    background: var(--sidebar-bg);
+    border-right: 1px solid var(--sidebar-border);
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    position: fixed;
+    top: 0;
+    left: 0;
+    z-index: 1000;
+    /* 优化过渡动画 */
+    transition: width var(--transition-speed) var(--transition-ease);
+    box-shadow: 4px 0 24px rgba(0, 0, 0, 0.02);
+    overflow: hidden; /* 关键：防止收缩时内容溢出导致跳动 */
+    white-space: nowrap; /* 关键：防止文字换行 */
+}
+
+/* 顶部 Header */
+.sidebar-header {
+    height: 72px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between; /* 展开时：两端对齐 */
+    padding: 0 24px;
+    margin-bottom: 10px;
+    transition: padding var(--transition-speed) var(--transition-ease);
+}
+
+.header-content {
+    overflow: hidden;
+    transition: opacity 0.2s;
+}
+
+.header-content h2 {
+    font-size: 22px;
+    font-weight: 800;
+    margin: 0;
+    letter-spacing: -0.5px;
+    /* 渐变 Logo 文字 */
+    background: linear-gradient(135deg, #007aff, #00c6ff);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+
+.toggle-btn {
+    background: transparent;
+    border: none;
+    color: #999;
+    cursor: pointer;
+    padding: 6px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+    flex-shrink: 0;
+}
+.toggle-btn:hover {
+    background-color: var(--nav-hover-bg);
+    color: #333;
+}
+
+/* 导航菜单区 */
+.sidebar-nav {
+    flex: 1;
+    overflow-y: auto;
+    padding: 0 16px;
+    overflow-x: hidden;
+    transition: padding var(--transition-speed) var(--transition-ease);
+}
+
+.sidebar-nav ul {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.nav-link {
+    display: flex;
+    align-items: center;
+    padding: 12px 16px;
+    text-decoration: none;
+    color: var(--nav-text-color);
+    font-size: 15px;
+    font-weight: 500;
+    border-radius: 12px;
+    transition: all 0.2s ease, padding var(--transition-speed) var(--transition-ease);
+    position: relative;
+    justify-content: flex-start; /* 默认左对齐 */
+    height: 48px;
+    box-sizing: border-box;
+}
+
+.nav-link:hover {
+    background-color: var(--nav-hover-bg);
+    color: #1d1d1f;
+    transform: translateX(2px);
+}
+
+.nav-link.active {
+    background-color: var(--nav-active-bg);
+    color: var(--nav-active-color);
+    font-weight: 600;
+}
+
+.nav-icon {
+    margin-right: 0; 
+    stroke-width: 2px;
+    transition: all 0.2s;
+    flex-shrink: 0;
+    color: #86868b;
+    width: 24px; 
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.nav-link:hover .nav-icon {
+    color: #1d1d1f;
+}
+
+.nav-link.active .nav-icon {
+    color: var(--nav-active-color);
+    filter: drop-shadow(0 2px 4px rgba(0, 122, 255, 0.2));
+}
+
+.nav-text {
+    flex: 1;
+    text-align: center;
+    white-space: nowrap;
+    opacity: 1;
+    transition: opacity 0.15s ease;
+    padding-right: 24px; /* 补偿左侧图标占位，实现视觉居中 */
+}
+
+/* 底部 Footer */
+.sidebar-footer {
+    padding: 16px 20px;
+    border-top: 1px solid var(--sidebar-border);
+    background: linear-gradient(to bottom, rgba(255,255,255,0), rgba(255,255,255,0.8));
+    white-space: nowrap;
+    overflow: hidden;
+    transition: padding var(--transition-speed) var(--transition-ease);
+}
+
+.logout-link {
+    display: flex;
+    align-items: center;
+    color: #ff4d4f;
+    text-decoration: none;
+    font-weight: 600;
+    font-size: 14px;
+    padding: 12px;
+    border-radius: 10px;
+    transition: background 0.2s;
+    justify-content: flex-start;
+    height: 44px;
+    box-sizing: border-box;
+}
+
+.logout-link:hover {
+    background-color: #fff1f0;
+}
+
+.logout-link .nav-icon {
+    color: #ff4d4f;
+    margin-right: 0;
+}
+
+.logout-link .nav-text {
+    flex: 1;
+    text-align: center;
+    padding-right: 24px;
+}
+
+/* --- 4. 侧边栏收起状态 (基于 body.sidebar-collapsed) --- */
+
+/* 宽度变化 */
+body.sidebar-collapsed .sidebar {
+    width: var(--sidebar-collapsed-width);
+}
+
+/* 隐藏文字 */
+body.sidebar-collapsed .sidebar .nav-text,
+body.sidebar-collapsed .sidebar .header-content {
+    display: none !important;
+    opacity: 0;
+}
+
+/* 调整 Header 布局 */
+body.sidebar-collapsed .sidebar .sidebar-header {
+    padding: 0;
+    justify-content: center;
+}
+
+/* 调整导航菜单容器 */
+body.sidebar-collapsed .sidebar .sidebar-nav {
+    padding: 0 12px;
+}
+
+/* 调整链接样式 */
+body.sidebar-collapsed .sidebar .nav-link {
+    justify-content: center;
+    padding: 12px 0;
+}
+
+body.sidebar-collapsed .sidebar .nav-link:hover {
+    transform: none;
+}
+
+/* 调整底部 */
+body.sidebar-collapsed .sidebar .sidebar-footer {
+    padding: 16px 12px;
+}
+
+body.sidebar-collapsed .sidebar .logout-link {
+    justify-content: center;
+    padding: 12px 0;
+}
+
+body.sidebar-collapsed .sidebar .nav-icon {
+    margin-right: 0;
+}
+
+/* --- 5. 右侧内容区域 --- */
+.main-content {
+    margin-left: var(--sidebar-width);
+    transition: margin-left var(--transition-speed) var(--transition-ease);
+    background-color: var(--bg-color);
+    width: auto;
+    min-width: 0;
+    flex-grow: 1;
+    display: flex;
+    flex-direction: column;
+}
+
+/* 收起时调整边距 */
+body.sidebar-collapsed .main-content {
+    margin-left: var(--sidebar-collapsed-width) !important;
+}
+
+/* 登录页特殊布局 */
+.main-content.full-width {
+    margin-left: 0 !important;
+    width: 100%;
+    align-items: center;
+    justify-content: center;
+}
+
+.main-footer {
+    margin-top: auto;
+    padding: 20px;
+    text-align: center;
+    color: #86868b;
+    font-size: 12px;
+}
+
+/* --- 6. 通用组件样式 (Card, Btn, Form) --- */
+
+/* 容器限制 (用于设置页等) */
+.container {
+    max-width: 980px;
+    margin: 0 auto;
+}
+
+/* 卡片风格 */
+.card {
+    background: var(--card-bg);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    padding: 30px;
+    margin-bottom: 20px;
+}
+
+/* 登录页卡片宽度限制 */
+.full-width .container, 
+.full-width .card {
+    width: 100%;
+    max-width: 400px;
+}
+
+/* 表单元素 */
+input[type="text"],
+input[type="password"],
+input[type="email"],
+input[type="number"] {
+    width: 100%;
+    padding: 12px;
+    margin: 8px 0 20px 0;
+    border: 1px solid #d2d2d7;
+    border-radius: 8px;
+    box-sizing: border-box;
+    font-size: 16px;
+    transition: border-color 0.2s;
+    background-color: #fff;
+}
+
+input:focus {
+    outline: none;
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 2px rgba(0, 113, 227, 0.2);
+}
+
+.btn {
+    background-color: var(--primary-color);
+    color: white;
+    border: none;
+    padding: 10px 20px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 500;
+    width: 100%;
+    transition: background-color 0.2s;
+    text-align: center;
+    display: inline-block;
+}
+
+.btn:hover {
+    background-color: #0077ed;
+}
+
+/* 消息提示 (Flash Messages) */
+.flash-messages {
+    width: 100%;
+    max-width: 600px;
+    margin: 0 auto 20px auto;
+    z-index: 1000;
+}
+
+.alert {
+    padding: 12px 20px;
+    border-radius: 8px;
+    margin-bottom: 10px;
+    font-size: 14px;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+}
+.alert.success { background-color: #d4edda; color: #155724; border-left: 4px solid #28a745; }
+.alert.error { background-color: #f8d7da; color: #721c24; border-left: 4px solid #dc3545; }
+.alert.info { background-color: #d1ecf1; color: #0c5460; border-left: 4px solid #17a2b8; }

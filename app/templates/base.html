@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"> 
+    <title>{% block title %}Node Tool{% endblock %}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    
+    {% block styles %}{% endblock %}
+    
+    <style>
+        /* =========================================
+           1. 核心 CSS 变量与动画设置
+           ========================================= */
+        :root {
+            --sidebar-width-expanded: 240px;
+            --sidebar-width-collapsed: 64px;
+            --transition-curve: cubic-bezier(0.2, 0.8, 0.2, 1); 
+            --transition-duration: 0.5s;
+        }
+
+        /* 初始加载时禁止动画，防止闪烁 */
+        body.no-transition * {
+            transition: none !important;
+        }
+
+        /* 侧边栏容器 */
+        .sidebar {
+            background: #ffffff;
+            border-right: 1px solid #eef1f5;
+            box-shadow: 4px 0 20px rgba(0, 0, 0, 0.03); 
+            display: flex;
+            flex-direction: column;
+            justify-content: flex-start;
+            z-index: 1000;
+            width: var(--sidebar-width-expanded);
+            transition: width var(--transition-duration) var(--transition-curve);
+            will-change: width;
+            white-space: nowrap;
+            overflow: hidden; 
+        }
+
+        /* 头部区域 */
+        .sidebar-header {
+            height: 70px;
+            padding: 0 22px; 
+            display: flex;
+            align-items: center;
+            justify-content: flex-start; 
+            flex-shrink: 0;
+            position: relative;
+            overflow: hidden;
+            transition: padding var(--transition-duration) var(--transition-curve), justify-content var(--transition-duration) step-end; 
+            z-index: 10;
+        }
+        
+        body:not(.sidebar-collapsed) .sidebar-header {
+            margin-bottom: 10px; 
+        }
+
+        /* Logo 容器 */
+        .logo-container {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            width: 100%; 
+            overflow: hidden;
+            transition: justify-content var(--transition-duration) var(--transition-curve);
+        }
+
+        /* Logo 图标 */
+        .logo-icon {
+            width: 30px; 
+            height: 30px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0; 
+            z-index: 2;
+        }
+
+        .logo-icon svg {
+            width: 100%;
+            height: 100%;
+            display: block; 
+        }
+
+        /* Logo 文字 */
+        .logo-text {
+            font-size: 19px;
+            font-weight: 800;
+            color: #1a202c;
+            font-family: 'Segoe UI', system-ui, sans-serif;
+            opacity: 1;
+            transform: translateX(0);
+            /* 展开时：延迟显示，显得优雅 */
+            transition: opacity 0.3s ease-out 0.15s, transform 0.3s var(--transition-curve) 0.15s;
+        }
+
+        /* 切换按钮 */
+        .toggle-btn {
+            position: absolute;
+            right: 18px;
+            width: 28px;
+            height: 28px;
+            border-radius: 6px;
+            background-color: transparent;
+            border: 1px solid transparent;
+            color: #94a3b8;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            opacity: 1;
+            transition: opacity 0.2s ease;
+        }
+
+        .toggle-btn:hover {
+            background-color: #f1f5f9;
+            color: #007aff;
+        }
+
+        /* 导航菜单 */
+        .sidebar-nav {
+            flex-grow: 1;
+            overflow-x: hidden;
+            overflow-y: auto;
+            padding: 0 12px;
+            transition: padding var(--transition-duration) var(--transition-curve);
+            position: relative; 
+            z-index: 20; 
+        }
+
+        .sidebar-nav ul { list-style: none; padding: 0; margin: 0; }
+        .sidebar-nav li { margin-bottom: 4px; }
+
+        .nav-link {
+            display: flex;
+            align-items: center;
+            padding: 10px 12px;
+            border-radius: 10px;
+            color: #64748b;
+            text-decoration: none;
+            transition: all 0.2s ease, padding var(--transition-duration) var(--transition-curve);
+            height: 44px;
+            box-sizing: border-box;
+            position: relative;
+            overflow: hidden;
+            z-index: 20;
+        }
+
+        .nav-link:hover {
+            background-color: #f8fafc;
+            color: #007aff;
+        }
+
+        .nav-link.active {
+            background-color: #eff6ff;
+            color: #007aff;
+            font-weight: 600;
+        }
+
+        .nav-icon {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 24px;
+            height: 24px;
+            flex-shrink: 0; 
+            margin-right: 12px;
+            transition: margin 0.4s var(--transition-curve);
+        }
+
+        .nav-text {
+            white-space: nowrap;
+            opacity: 1;
+            /* 展开时：延迟显示 */
+            transition: opacity 0.2s ease-out 0.1s, transform 0.4s var(--transition-curve);
+        }
+
+        /* 底部 Footer */
+        .sidebar-footer {
+            padding: 15px;
+            flex-shrink: 0;
+            border-top: 1px solid #f1f5f9;
+            margin-top: auto;
+            overflow: hidden;
+            transition: padding var(--transition-duration) var(--transition-curve);
+            position: relative; 
+            z-index: 20;
+        }
+        
+        .logout-link {
+            display: flex;
+            align-items: center;
+            padding: 10px 12px;
+            border-radius: 10px;
+            color: #64748b;
+            text-decoration: none;
+            transition: background 0.2s, padding var(--transition-duration) var(--transition-curve);
+            height: 44px;
+            box-sizing: border-box;
+            z-index: 20;
+        }
+        
+        .logout-link:hover {
+            background-color: #fff1f2;
+            color: #e11d48;
+        }
+
+        /* =========================================
+           2. 折叠状态逻辑 (Collapsed State) - 关键修复区
+           ========================================= */
+        body.sidebar-collapsed .sidebar {
+            width: var(--sidebar-width-collapsed);
+        }
+
+        /* Header 居中 */
+        body.sidebar-collapsed .sidebar-header {
+            padding: 0; 
+            justify-content: center; 
+            cursor: pointer;
+        }
+        
+        body.sidebar-collapsed .sidebar-header:hover .logo-icon {
+            transform: scale(1.1); 
+        }
+        
+        body.sidebar-collapsed .logo-container {
+            justify-content: center;
+            width: 100%;
+            gap: 0;
+        }
+
+        /* 🚨 修复 1：Logo 文字在折叠时立即消失 */
+        body.sidebar-collapsed .logo-text {
+            opacity: 0;
+            pointer-events: none;
+            position: absolute;
+            /* 关键：0秒延迟，瞬间隐藏 */
+            transition: opacity 0s linear; 
+        }
+
+        /* 🚨 修复 2：导航文字在折叠时立即消失 */
+        body.sidebar-collapsed .nav-text {
+            opacity: 0;
+            position: absolute;
+            left: 40px; /* 移出可视区域以防万一 */
+            pointer-events: none;
+            /* 关键：0秒延迟，瞬间隐藏 */
+            transition: opacity 0s linear; 
+        }
+
+        /* 切换按钮立即消失 */
+        body.sidebar-collapsed .toggle-btn {
+            opacity: 0;
+            pointer-events: none;
+            position: absolute;
+            transition: opacity 0s linear;
+        }
+        
+        /* 导航容器调整 */
+        body.sidebar-collapsed .sidebar-nav {
+            padding: 0 10px; 
+        }
+
+        body.sidebar-collapsed .nav-link, 
+        body.sidebar-collapsed .logout-link {
+            padding: 10px 0; 
+            justify-content: center; 
+        }
+
+        body.sidebar-collapsed .nav-icon {
+            margin-right: 0;
+        }
+        
+        body.sidebar-collapsed .sidebar-footer {
+            padding: 15px 10px;
+        }
+
+        /* 内容区自适应 */
+        .main-content {
+            transition: margin-left var(--transition-duration) var(--transition-curve);
+        }
+    </style>
+</head>
+<body>
+    <script>
+        (function() {
+            var isCollapsed = localStorage.getItem('sidebar-collapsed') === 'true';
+            if (isCollapsed) {
+                document.body.classList.add('sidebar-collapsed');
+            }
+            document.body.classList.add('no-transition');
+        })();
+    </script>
+
+    <div class="app-wrapper" id="appWrapper">
+        
+        {% if request.endpoint != 'auth.login' %}
+        <aside class="sidebar" id="sidebar">
+            <div class="sidebar-header" id="sidebarHeader">
+                <div class="logo-container">
+                    <div class="logo-icon">
+                        <svg class="icon" viewBox="0 0 1051 1024" version="1.1" xmlns="http://www.w3.org/2000/svg" width="100%" height="100%">
+                            <path d="M727.204278 714.609626m-135.255615 0a135.255615 135.255615 0 1 0 270.51123 0 135.255615 135.255615 0 1 0-270.51123 0Z" fill="#cdcdcd" class="selected"></path>
+                            <path d="M779.225668 492.834225h-163.730481c-50.37861 0-91.995722-41.069519-91.995722-91.995722V237.655615c0-50.37861 41.069519-91.995722 91.995722-91.995722h163.730481c50.37861 0 91.995722 41.069519 91.995722 91.995722v163.730481c-0.547594 50.37861-41.617112 91.448128-91.995722 91.448129z m-163.730481-300.081284c-24.641711 0-44.902674 20.260963-44.902674 44.902674v163.730481c0 24.641711 20.260963 44.902674 44.902674 44.902674h163.730481c24.641711 0 44.902674-20.260963 44.902674-44.902674V237.655615c0-24.641711-20.260963-44.902674-44.902674-44.902674h-163.730481zM398.100535 867.935829H234.370053c-50.37861 0-91.995722-41.069519-91.995721-91.995722v-163.730481c0-50.37861 41.069519-91.995722 91.995721-91.995722h163.730482c50.37861 0 91.995722 41.069519 91.995722 91.995722v163.730481c0 50.926203-41.069519 91.995722-91.995722 91.995722z m-163.730482-300.628877c-24.641711 0-44.902674 20.260963-44.902673 44.902674v163.730481c0 24.641711 20.260963 44.902674 44.902673 44.902674h163.730482c24.641711 0 44.902674-20.260963 44.902674-44.902674v-163.730481c0-24.641711-20.260963-44.902674-44.902674-44.902674H234.370053zM779.225668 867.935829h-163.730481c-50.37861 0-91.995722-41.069519-91.995722-91.995722v-163.730481c0-50.37861 41.069519-91.995722 91.995722-91.995722h163.730481c50.37861 0 91.995722 41.069519 91.995722 91.995722v163.730481c-0.547594 50.926203-41.617112 91.995722-91.995722 91.995722z m-163.730481-300.628877c-24.641711 0-44.902674 20.260963-44.902674 44.902674v163.730481c0 24.641711 20.260963 44.902674 44.902674 44.902674h163.730481c24.641711 0 44.902674-20.260963 44.902674-44.902674v-163.730481c0-24.641711-20.260963-44.902674-44.902674-44.902674h-163.730481zM278.17754 342.793583H205.347594c-13.142246 0-23.546524-10.404278-23.546524-23.546524s10.404278-23.546524 23.546524-23.546524h72.829946c13.142246 0 23.546524 10.404278 23.546524 23.546524zM427.670588 342.793583H354.840642c-13.142246 0-23.546524-10.404278-23.546524-23.546524s10.404278-23.546524 23.546524-23.546524h72.829946c13.142246 0 23.546524 10.404278 23.546524 23.546524s-10.951872 23.546524-23.546524 23.546524z" fill="#1296db" class=""></path>
+                        </svg>
+                    </div>
+                    <span class="logo-text" style="margin-left: 10px;">Node Tool</span>
+                </div>
+                
+                <button id="toggleSidebar" class="toggle-btn" title="折叠/展开菜单">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                        <line x1="9" y1="3" x2="9" y2="21"></line>
+                    </svg>
+                </button>
+            </div>
+            
+            <nav class="sidebar-nav">
+                <ul>
+                    <li>
+                        <a href="{{ url_for('dashboard.index') }}" class="nav-link {% if request.endpoint and 'dashboard' in request.endpoint %}active{% endif %}">
+                            <div class="nav-icon">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <rect x="3" y="3" width="7" height="7" rx="1"></rect>
+                                    <rect x="14" y="3" width="7" height="7" rx="1"></rect>
+                                    <rect x="14" y="14" width="7" height="7" rx="1"></rect>
+                                    <rect x="3" y="14" width="7" height="7" rx="1"></rect>
+                                </svg>
+                            </div>
+                            <span class="nav-text">仪表盘</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="{{ url_for('subscription.manager') }}" class="nav-link {% if request.endpoint and 'subscription' in request.endpoint %}active{% endif %}">
+                            <div class="nav-icon">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                                    <polyline points="7 10 12 15 17 10"></polyline>
+                                    <line x1="12" y1="15" x2="12" y2="3"></line>
+                                </svg>
+                            </div>
+                            <span class="nav-text">订阅管理</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="{{ url_for('history.view_history') }}" class="nav-link {% if request.endpoint and 'history' in request.endpoint %}active{% endif %}">
+                            <div class="nav-icon">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <circle cx="12" cy="12" r="10"></circle>
+                                    <polyline points="12 6 12 12 16 14"></polyline>
+                                </svg>
+                            </div>
+                            <span class="nav-text">流量历史</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="{{ url_for('settings.general_settings') }}" class="nav-link {% if request.endpoint and 'settings' in request.endpoint %}active{% endif %}">
+                            <div class="nav-icon">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <circle cx="12" cy="12" r="3"></circle>
+                                    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+                                </svg>
+                            </div>
+                            <span class="nav-text">系统设置</span>
+                        </a>
+                    </li>
+                </ul>
+            </nav>
+
+            <div class="sidebar-footer">
+                <a href="{{ url_for('auth.logout') }}" class="logout-link" title="安全退出">
+                     <div class="nav-icon" style="color: #ff4d4f;">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+                            <polyline points="16 17 21 12 16 7"></polyline>
+                            <line x1="21" y1="12" x2="9" y2="12"></line>
+                        </svg>
+                     </div>
+                    <span class="nav-text">退出登录</span>
+                </a>
+            </div>
+        </aside>
+        {% endif %}
+
+        <main class="main-content d-flex flex-column {% if request.endpoint == 'auth.login' %}full-width{% endif %}" 
+              style="min-height: 100vh; display: flex; flex-direction: column;">
+             
+             <div class="flash-messages">
+                {% with messages = get_flashed_messages(with_categories=true) %}
+                    {% if messages %}
+                        {% for category, message in messages %}
+                            <div class="alert {{ category }}">
+                                {{ message }}
+                            </div>
+                        {% endfor %}
+                    {% endif %}
+                {% endwith %}
+            </div>
+
+            <div class="flex-grow-1" style="flex: 1;">
+                {% block content %}{% endblock %}
+            </div>
+
+            {% if request.endpoint != 'auth.login' %}
+            <footer class="main-footer">
+                <p>Node Tool v2.0 &copy; 2025</p>
+            </footer>
+            {% endif %}
+        </main>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+    {% block scripts %}{% endblock %}
+
+    <script>
+        // 页面加载完成后的逻辑
+        window.addEventListener('load', function() {
+            setTimeout(function() {
+                // 移除禁止动画类，恢复过渡效果
+                document.body.classList.remove('no-transition');
+            }, 100);
+        });
+        
+        // 获取元素
+        const toggleBtn = document.getElementById('toggleSidebar');
+        const sidebarHeader = document.getElementById('sidebarHeader'); 
+        
+        // 1. 切换按钮逻辑
+        if (toggleBtn) {
+            toggleBtn.addEventListener('click', function(e) {
+                e.stopPropagation(); 
+                document.body.classList.toggle('sidebar-collapsed');
+                const isCollapsed = document.body.classList.contains('sidebar-collapsed');
+                localStorage.setItem('sidebar-collapsed', isCollapsed);
+            });
+        }
+        
+        // 2. 头部点击逻辑（仅用于展开）
+        if (sidebarHeader) {
+            sidebarHeader.addEventListener('click', function() {
+                if (document.body.classList.contains('sidebar-collapsed')) {
+                    document.body.classList.remove('sidebar-collapsed');
+                    localStorage.setItem('sidebar-collapsed', 'false');
+                }
+            });
+        }
+    </script>
+</body>
+</html>

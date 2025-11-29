@@ -1,0 +1,548 @@
+{% extends "base.html" %}
+
+{% block title %}系统设置 - Node Tool{% endblock %}
+
+{% block styles %}
+<style>
+    /* ===========================
+       1. Toast 提示框样式
+       =========================== */
+    .flash-messages { position: fixed; top: 30px; left: 50%; transform: translateX(-50%); z-index: 9999; display: flex; flex-direction: column; gap: 10px; align-items: center; width: auto; }
+    .alert { position: relative; width: fit-content; min-width: 130px; white-space: nowrap; padding: 14px 14px; background: #fff; border-radius: 6px; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08), 0 0 1px rgba(0,0,0,0.1); font-size: 15px; color: #333; font-weight: 500; display: flex; align-items: center; justify-content: center; opacity: 0; transition: all 0.3s; }
+    .alert[style*="opacity: 1"] { opacity: 1; transform: translateY(0); }
+    .alert.success { border-left: 4px solid #34c759; }
+    .alert.error { border-left: 4px solid #d74242; }
+    .alert.fade-out { opacity: 0 !important; transform: translateY(-20px) !important; }
+
+    /* ===========================
+       2. 基础布局与卡片样式
+       =========================== */
+    /* 🚨 统一容器样式 */
+    .dashboard-container {
+        padding: 20px;
+        box-sizing: border-box;
+        width: 100%;
+        max-width: 100%;
+    }
+
+    /* 🚨 新增：标题卡片样式 (高度 55px) */
+    .dashboard-title-card {
+        height: 55px; /* 特定要求：55px */
+        width: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        
+        /* 视觉美化 */
+        background: linear-gradient(to right, #ffffff, #f4f9ff);
+        border-radius: 12px;
+        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.03); 
+        border: 1px solid #eef1f5;
+        
+        margin-bottom: 20px;
+        box-sizing: border-box;
+        position: relative; 
+        overflow: hidden;
+    }
+
+    .dashboard-title-card h2 {
+        margin: 0;
+        font-size: 21px; /* 特定要求：21px */
+        font-weight: 700;
+        color: #333;
+        letter-spacing: 1px;
+        z-index: 2; 
+        font-family: 'Segoe UI', system-ui, sans-serif;
+    }
+
+    /* 背景水印装饰：设置图标 */
+    .dashboard-title-card::after {
+        content: '⚙️'; 
+        position: absolute;
+        right: 30px;
+        bottom: -20px;
+        font-size: 60px;
+        opacity: 0.08; 
+        transform: rotate(-15deg);
+        z-index: 1;
+        pointer-events: none; 
+        filter: grayscale(100%);
+    }
+
+    .card { 
+        border: none; 
+        border-radius: 12px; 
+        box-shadow: 0 4px 15px rgba(0,0,0,0.05); 
+        background: white; 
+        margin-bottom: 2px; 
+    }
+    .card-body { 
+        padding: 0px; 
+    }
+    
+    /* 专用的内边距，用于通用设置和数据库设置卡片 */
+    .general-card-padding {
+        padding: 15px 20px; 
+    }
+    
+    .form-label { 
+        font-weight: 600; 
+        color: #555; 
+        margin-bottom: 3px; 
+        font-size: 14px;    
+    }
+    
+    .form-control { 
+        border-radius: 8px; 
+        padding: 6px 12px; 
+        border: 1px solid #ddd; 
+        font-size: 14px;
+    } 
+
+    .mb-3 {
+        margin-bottom: -10px !important; 
+    }
+    
+    /* 按钮样式 */
+    .btn { padding: 6px 16px; border-radius: 8px; font-size: 14px; font-weight: 500; cursor: pointer; border: none; transition: background 0.2s; white-space: nowrap; width: auto; }
+    .btn-primary { background-color: #007aff; border-color: #007aff; color: white; }
+    .btn-primary:hover { background-color: #0062cc; border-color: #0062cc; }
+    .btn-danger { background-color: #d74242; color: white; }
+    .btn-sm { font-size: 13px; padding: 5px 12px; }
+    .btn-secondary { background-color: #f5f5f7; color: #333; border: 1px solid #e5e5ea; }
+    .btn-secondary:hover { background-color: #e5e5ea; }
+
+    /* 模态框样式 */
+    .modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 10000; align-items: center; justify-content: center; backdrop-filter: blur(3px); opacity: 0; transition: opacity 0.3s; }
+    .modal-overlay.active { display: flex; opacity: 1; }
+    .modal-box { background: white; width: 400px; padding: 30px; border-radius: 12px; box-shadow: 0 20px 50px rgba(0,0,0,0.2); transform: scale(0.95); transition: transform 0.3s; }
+    .modal-overlay.active .modal-box { transform: scale(1); }
+    .modal-title { font-size: 20px; font-weight: 700; margin-bottom: 20px; border-bottom: 1px solid #eee; padding-bottom: 10px; }
+    .modal-input-group { margin-bottom: 15px; }
+    .modal-input-group label { display: block; font-weight: 600; margin-bottom: 5px; color: #555; }
+    .modal-input-group input { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px; box-sizing: border-box; }
+    .modal-actions { margin-top: 20px; text-align: right; }
+    .btn-cancel { background: #f0f0f0; color: #333; border: none; padding: 10px 15px; border-radius: 6px; cursor: pointer; margin-right: 10px; }
+    .btn-confirm { background: #007aff; color: white; border: none; padding: 10px 15px; border-radius: 6px; cursor: pointer; }
+
+    /* ===========================
+       3. 布局与样式调整 
+       =========================== */
+    .settings-grid { display: flex; flex-direction: column; gap: 15px; }
+
+    /* 估算卡片样式 */
+    .notice-card { background: white; border: none; border-radius: 12px; padding: 15px 20px; box-shadow: 0 4px 15px rgba(0, 0, 0, 0.05); display: flex; flex-direction: column; }
+    .stat-grid-compact { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; padding-top: 0px; }
+    .stat-item-compact { display: flex; flex-direction: column; align-items: flex-start; min-width: 80px; }
+    .stat-label { color: #777; font-weight: 500; font-size: 11px; text-transform: uppercase; margin-bottom: 2px; }
+    .stat-value { color: #333; font-weight: 700; font-size: 16px; }
+    .stat-value.highlight { color: #d74242; font-size: 17px; }
+
+    /* 数据库设置与通用设置头部样式 */
+    .db-card-header { 
+        display: flex; 
+        justify-content: space-between; 
+        align-items: center; 
+        padding-bottom: 10px; 
+        margin-bottom: 10px; 
+        border-bottom: none; 
+    }
+    
+    .db-header-left {
+        display: flex;
+        align-items: center;
+        gap: 20px; 
+    }
+    
+    .db-card-title { font-size: 15px; font-weight: 700; color: #333; }
+    
+    .db-header-radios { 
+        display: flex; 
+        gap: 15px; 
+        align-items: center;
+    }
+    .radio-label { display: flex; align-items: center; cursor: pointer; gap: 8px; font-weight: 500; color: #333; margin: 0; font-size: 14px; }
+    
+    /* 通用参数三列布局容器样式 */
+    .general-settings-grid { 
+        display: grid;
+        grid-template-columns: 1fr 1fr 1fr; 
+        row-gap: -10px; 
+        column-gap: 10px;
+    }
+
+    .general-settings-grid .mb-3 {
+        margin-bottom: 0px !important; 
+    }
+
+    .pg-row-3 { 
+        display: grid; 
+        grid-template-columns: 1fr 1fr 1fr; 
+        gap: 10px;          
+        margin-top: 0px;    
+        padding-top: 0px;   
+        border-top: none;   
+    }
+    
+    .pg-row-2 { 
+        display: grid; 
+        grid-template-columns: 1fr 1fr; 
+        gap: 10px;        
+        margin-top: -10px;
+    }
+    
+    .hidden { display: none !important; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="flash-messages">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            {% for category, message in messages %}
+            <div class="alert {{ category }}" style="opacity: 1; transform: translateY(0);">
+                {{ message }}
+            </div>
+            {% endfor %}
+        {% endif %}
+    {% endwith %}
+</div>
+
+<div class="dashboard-container">
+    
+    <div class="dashboard-title-card">
+        <h2>系统设置</h2>
+    </div>
+
+    <div class="settings-grid">
+        
+        <div class="notice-card shadow">
+            <div class="stat-grid-compact">
+                <div class="stat-item-compact">
+                    <span class="stat-label">总节点数</span>
+                    <span class="stat-value">{{ storage_stats.total_nodes }} 个</span>
+                </div>
+                <div class="stat-item-compact">
+                    <span class="stat-label">采集间隔</span>
+                    <span class="stat-value">{{ storage_stats.interval_minutes }} 分钟</span>
+                </div>
+                <div class="stat-item-compact">
+                    <span class="stat-label">每日采集次数</span>
+                    <span class="stat-value">{{ storage_stats.acquisitions_per_day }} 次</span> 
+                </div>
+                <div class="stat-item-compact">
+                    <span class="stat-label">每日新增记录</span>
+                    <span class="stat-value">{{ storage_stats.records_per_day }} 条</span>
+                </div>
+                <div class="stat-item-compact">
+                    <span class="stat-label">每日新增空间</span>
+                    <span class="stat-value highlight">{{ storage_stats.mb_per_day }} MB</span>
+                </div>
+                <div class="stat-item-compact">
+                    <span class="stat-label">当前 DB 大小</span>
+                    <span class="stat-value highlight">{{ storage_stats.actual_db_size }}</span>
+                </div>
+            </div>
+        </div>
+        
+        <div class="card shadow">
+            <div class="card-body general-card-padding">
+                
+                <div class="db-card-header" style="border-bottom: 1px solid #f0f0f0; margin-bottom: 15px;">
+                    <div class="db-header-left">
+                        <span class="db-card-title">通用参数配置</span>
+                    </div>
+                    
+                    <div style="display: flex; gap: 8px;">
+                        <button type="button" 
+                                onclick="testGeneralApiConnection()" 
+                                class="btn btn-secondary btn-sm"
+                                id="btnTestApi">
+                            API连通性
+                        </button>
+
+                        <button type="button" 
+                                onclick="openModal()"
+                                class="btn btn-danger btn-sm" 
+                                style="background-color: #d74242; border-color: #d74242; color: white;">
+                            修改密码
+                        </button>
+
+                        <button type="submit" 
+                                form="settingsForm" 
+                                class="btn btn-primary btn-sm">
+                            保存设置
+                        </button>
+                    </div>
+                </div>
+
+                <form id="settingsForm" method="POST" action="{{ url_for('settings.general_settings') }}">
+                    <div class="general-settings-grid">
+                        {% for item in config_items %}
+                        <div class="mb-3">
+                            <label for="{{ item.key }}" class="form-label">{{ item.description }}</label>
+                            <input type="{{ item.input_type }}" 
+                                class="form-control config-input" 
+                                id="{{ item.key }}" 
+                                name="{{ item.key }}" 
+                                data-key-name="{{ item.key }}"
+                                value="{{ item.value if item.value is not none else '' }}">
+                        </div>
+                        {% endfor %}
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <div class="card shadow">
+            <div class="card-body general-card-padding">
+                <div class="db-card-header">
+                    <div class="db-header-left">
+                        <span class="db-card-title">数据库连接配置</span>
+                        
+                        <div class="db-header-radios">
+                            <label class="radio-label">
+                                <input type="radio" name="db_mode" value="sqlite" form="dbSettingsForm"
+                                    {% if db_config.db_mode != 'psql' %}checked{% endif %} 
+                                    onchange="toggleDbSettings()"> 
+                                SQLite (本地文件)
+                            </label>
+                            <label class="radio-label">
+                                <input type="radio" name="db_mode" value="psql" form="dbSettingsForm"
+                                    {% if db_config.db_mode == 'psql' %}checked{% endif %} 
+                                    onchange="toggleDbSettings()"> 
+                                PostgreSQL (推荐)
+                            </label>
+                        </div>
+                    </div>
+                    
+                    <div style="display: flex; gap: 8px;">
+                        <button type="button" onclick="testConnection()" class="btn btn-secondary btn-sm" id="btnTestConn">
+                            DB连接测试
+                        </button>
+                        
+                        <button type="submit" form="dbSettingsForm" class="btn btn-primary btn-sm">
+                            保存配置
+                        </button>
+                    </div>
+                </div>
+
+                <form id="dbSettingsForm" method="POST" action="{{ url_for('settings.save_database_settings') }}">
+                    
+                    <div id="pgSettings" class="{% if db_config.db_mode != 'psql' %}hidden{% endif %}">
+                        <div class="pg-row-3">
+                            <div>
+                                <label class="form-label">主机地址 (Host)</label>
+                                <input type="text" class="form-control" id="pg_host" name="pg_host" value="{{ db_config.psql_config.host }}">
+                            </div>
+                            <div>
+                                <label class="form-label">端口 (Port)</label>
+                                <input type="text" class="form-control" id="pg_port" name="pg_port" value="{{ db_config.psql_config.port }}">
+                            </div>
+                            <div>
+                                <label class="form-label">数据库名 (Database)</label>
+                                <input type="text" class="form-control" id="pg_db" name="pg_db" value="{{ db_config.psql_config.database }}">
+                            </div>
+                        </div>
+                        
+                        <div class="pg-row-2">
+                            <div>
+                                <label class="form-label">用户名 (User)</label>
+                                <input type="text" class="form-control" id="pg_user" name="pg_user" value="{{ db_config.psql_config.user }}">
+                            </div>
+                            <div>
+                                <label class="form-label">密码 (Password)</label>
+                                <input type="password" class="form-control" id="pg_password" name="pg_password" value="{{ db_config.psql_config.password }}">
+                            </div>
+                        </div>
+                    </div>
+                </form>
+            </div>
+        </div>
+        
+    </div>
+</div>
+
+<div id="passwordModal" class="modal-overlay">
+    <div class="modal-box" onclick="event.stopPropagation()">
+        <h3 class="modal-title">修改管理员密码</h3>
+        <form action="{{ url_for('settings.change_password') }}" method="POST">
+            <div class="modal-input-group">
+                <label>新密码</label>
+                <input type="password" name="new_password" required placeholder="请输入新密码">
+            </div>
+            <div class="modal-input-group">
+                <label>确认新密码</label>
+                <input type="password" name="confirm_password" required placeholder="再次输入新密码">
+            </div>
+            <div class="modal-actions">
+                <button type="button" class="btn-cancel" onclick="closeModal()">取消</button>
+                <button type="submit" class="btn-confirm">确定修改</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    // 1. Toast 显示函数
+    function showToast(message, type='info') {
+        const container = document.querySelector('.flash-messages');
+        const alert = document.createElement('div');
+        alert.className = `alert ${type}`;
+        alert.style.opacity = '0';
+        alert.innerHTML = message; 
+        container.appendChild(alert);
+        
+        requestAnimationFrame(() => {
+            alert.style.opacity = '1';
+            alert.style.transform = 'translateY(0)';
+        });
+
+        setTimeout(() => {
+            alert.style.opacity = '0';
+            setTimeout(() => alert.remove(), 400);
+        }, 3000);
+    }
+
+    document.addEventListener('DOMContentLoaded', function() {
+        const alerts = document.querySelectorAll('.flash-messages .alert');
+        if (alerts.length > 0) {
+            setTimeout(() => {
+                alerts.forEach(alert => {
+                    alert.classList.add('fade-out');
+                    setTimeout(() => {
+                        alert.remove();
+                    }, 400); 
+                });
+            }, 2500); 
+        }
+        toggleDbSettings();
+    });
+
+    // 2. 模态框控制逻辑
+    function openModal() {
+        document.getElementById('passwordModal').classList.add('active');
+    }
+    
+    function closeModal() {
+        document.getElementById('passwordModal').classList.remove('active');
+    }
+
+    document.getElementById('passwordModal').addEventListener('click', function(e) {
+        if (e.target.id === 'passwordModal') {
+            closeModal();
+        }
+    });
+
+    // 3. 数据库设置切换显示逻辑
+    function toggleDbSettings() {
+        const psqlRadio = document.querySelector('input[name="db_mode"][value="psql"]');
+        const pgSettingsDiv = document.getElementById('pgSettings');
+        
+        if (psqlRadio.checked) {
+            pgSettingsDiv.classList.remove('hidden');
+        } else {
+            pgSettingsDiv.classList.add('hidden');
+        }
+    }
+
+    // 4. DB 测试连接逻辑
+    function testConnection() {
+        const btn = document.getElementById('btnTestConn');
+        const originalText = btn.innerText;
+        btn.disabled = true;
+        btn.innerText = '连接中...';
+
+        const data = {
+            db_mode: document.querySelector('input[name="db_mode"]:checked').value,
+            pg_host: document.getElementById('pg_host').value,
+            pg_port: document.getElementById('pg_port').value,
+            pg_user: document.getElementById('pg_user').value,
+            pg_password: document.getElementById('pg_password').value,
+            pg_db: document.getElementById('pg_db').value
+        };
+
+        fetch("{{ url_for('settings.test_db_connection_api') }}", {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data)
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.status === 'success') {
+                showToast(data.message, 'success');
+            } else {
+                showToast(data.message, 'error');
+            }
+        })
+        .catch(error => {
+            showToast('❌ 请求失败: ' + error, 'error');
+        })
+        .finally(() => {
+            btn.disabled = false;
+            btn.innerText = originalText;
+        });
+    }
+
+    // 5. 通用 API 连通性测试逻辑
+    function testGeneralApiConnection() {
+        const btn = document.getElementById('btnTestApi');
+        const originalText = btn.innerHTML;
+        
+        let urlInput = null;
+        const allInputs = document.querySelectorAll('#settingsForm input');
+        
+        for (let input of allInputs) {
+            const keyName = input.getAttribute('name').toUpperCase();
+            if ((keyName.includes('URL') || keyName.includes('LINK') || keyName.includes('API')) && input.value.trim() !== '') {
+                urlInput = input;
+                break; 
+            }
+        }
+        
+        if (!urlInput) {
+            for (let input of allInputs) {
+                if (input.value.trim().startsWith('http')) {
+                    urlInput = input;
+                    break;
+                }
+            }
+        }
+
+        if (!urlInput) {
+            showToast('⚠️ 未在设置中找到有效的 API 地址', 'error');
+            return;
+        }
+
+        const targetUrl = urlInput.value.trim();
+        
+        btn.disabled = true;
+        btn.innerHTML = '测试中...'; 
+
+        fetch("{{ url_for('settings.test_general_api_connectivity') }}", {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url: targetUrl })
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.status === 'success') {
+                showToast(data.message, 'success');
+            } else if (data.status === 'warning') {
+                showToast(data.message, 'info'); 
+            } else {
+                showToast(data.message, 'error');
+            }
+        })
+        .catch(error => {
+            showToast('❌ 请求异常: ' + error, 'error');
+        })
+        .finally(() => {
+            btn.disabled = false;
+            btn.innerHTML = originalText;
+        });
+    }
+</script>
+{% endblock %}

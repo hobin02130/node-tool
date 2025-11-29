@@ -1,0 +1,9 @@
+flask
+flask-sqlalchemy
+flask-apscheduler
+flask-login
+flask-limiter
+apscheduler
+requests
+ruamel.yaml
+psycopg2-binary

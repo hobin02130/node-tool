@@ -1,0 +1,1768 @@
+{% extends 'base.html' %}
+
+{% block title %}订阅管理 - Node Tool{% endblock %}
+
+{% block styles %}
+<style>
+    .container-fluid {
+        padding: 20px;
+    }
+
+    /* =========================================
+       1. 标题栏样式 (复用仪表盘风格 - 50px)
+       ========================================= */
+    .dashboard-title-card {
+        height: 55px;
+        width: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        
+        /* 视觉美化 */
+        background: linear-gradient(to right, #ffffff, #f4f9ff);
+        border-radius: 12px;
+        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.03); 
+        border: 1px solid #eef1f5;
+        
+        margin-bottom: 25px;
+        box-sizing: border-box;
+        position: relative; 
+        overflow: hidden;
+    }
+
+    .dashboard-title-card h2 {
+        margin: 0;
+        font-size: 21px;
+        font-weight: 700;
+        color: #333;
+        letter-spacing: 1px;
+        z-index: 2; 
+        font-family: 'Segoe UI', system-ui, sans-serif;
+    }
+
+    /* 背景水印装饰 */
+    .dashboard-title-card::after {
+        content: '🗂️'; 
+        position: absolute;
+        right: 30px;
+        bottom: -25px;
+        font-size: 60px;
+        opacity: 0.08; 
+        transform: rotate(-15deg);
+        z-index: 1;
+        pointer-events: none; 
+        filter: grayscale(100%);
+    }
+
+    /* =========================================
+       2. 网格布局与卡片
+       ========================================= */
+    .top-section-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 20px;
+        margin-bottom: 25px;
+    }
+    
+    .subscription-list {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 15px;
+    }
+    
+    .sub-card {
+        background: white;
+        border-radius: 12px;
+        padding: 25px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+        border: 1px solid #eee;
+        height: 100%;
+        box-sizing: border-box;
+        display: flex;
+        flex-direction: column;
+    }
+
+    .sub-card-compact {
+        background: white;
+        border-radius: 10px;
+        padding: 15px 20px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.03);
+        border: 1px solid #eee;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+    }
+
+    .sub-card-expanded {
+        background: white;
+        border-radius: 10px;
+        padding: 20px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.03);
+        border: 1px solid #eee;
+        display: flex;
+        flex-direction: column;
+        gap: 15px;
+    }
+
+    .card-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 20px;
+        padding-bottom: 15px;
+        border-bottom: 1px solid #f5f5f7;
+    }
+    
+    .sub-card-compact .card-header, 
+    .sub-card-expanded .card-header {
+        border-bottom: none;
+        margin-bottom: 5px;
+        padding-bottom: 0;
+    }
+    
+    .sub-card-expanded .card-header {
+        margin-bottom: 10px;
+    }
+
+    .card-title {
+        font-size: 16px;
+        font-weight: 700;
+        color: #333;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+    
+    .card-desc-compact { 
+        font-size: 12px; 
+        color: #888; 
+        margin: 0; 
+        white-space: nowrap; 
+        overflow: hidden; 
+        text-overflow: ellipsis; 
+    }
+
+    /* =========================================
+       3. 统计展示与标签 (修改处：添加 text-red)
+       ========================================= */
+    .stats-grid {
+        display: grid;
+        /* 🚨 修改：从 3 列改为 4 列，以容纳新增的“屏蔽节点” */
+        grid-template-columns: 1fr 1fr 1fr 1fr;
+        gap: 10px;
+        margin-bottom: 20px;
+        text-align: center;
+    }
+    
+    .stat-item {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .stat-num {
+        font-size: 32px;
+        font-weight: 700;
+        line-height: 1.2;
+        transition: opacity 0.2s;
+    }
+    
+    .stat-label {
+        font-size: 12px;
+        color: #888;
+        margin-top: 5px;
+    }
+
+    .text-blue { color: #007aff; }
+    .text-green { color: #34c759; }
+    .text-yellow { color: #f5a623; }
+    /* 🚨 新增：红色字体样式 */
+    .text-red { color: #d74242; }
+
+    .protocol-tags { 
+        display: flex; 
+        flex-wrap: wrap; 
+        gap: 8px; 
+        justify-content: center; 
+        transition: opacity 0.2s; 
+        margin-top: auto; 
+        overflow: visible;
+    }
+    
+    .proto-tag {
+        display: flex;
+        align-items: center;
+        padding: 4px 10px;
+        background: #f5f5f7;
+        border-radius: 6px;
+        font-size: 12px;
+        font-weight: 500;
+        color: #555;
+        border: 1px solid #eee;
+    }
+    
+    .proto-name { margin-right: 6px; }
+    .proto-count { background: #fff; padding: 1px 5px; border-radius: 4px; font-weight: 700; color: #333; }
+
+    /* =========================================
+       4. 规则编辑与操作按钮
+       ========================================= */
+    .rule-actions { 
+        display: grid; 
+        grid-template-columns: repeat(2, 1fr);
+        gap: 12px; 
+        flex: 1; 
+        align-items: center; 
+        justify-content: center; 
+    }
+    
+    @media (min-width: 768px) {
+        .rule-actions {
+            display: flex;
+            gap: 15px;
+        }
+    }
+
+    .btn-edit-rule {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        flex: 1; 
+        min-width: 80px; 
+        height: 80px;
+        border: 1px solid #e1e1e8;
+        border-radius: 10px;
+        background: #f9f9fc;
+        cursor: pointer;
+        transition: all 0.2s;
+        text-decoration: none;
+        color: #555;
+    }
+    
+    .btn-edit-rule:hover {
+        border-color: #007aff;
+        background: #f0f7ff;
+        color: #007aff;
+        transform: translateY(-2px);
+    }
+    
+    .rule-icon { font-size: 20px; margin-bottom: 5px; }
+    .rule-name { font-size: 12px; font-weight: 600; text-align: center; line-height: 1.3;}
+
+    /* 🚨 订阅链接样式 (点击即复制优化) */
+    .sub-link-row {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        width: 100%;
+    }
+    
+    .link-input {
+        flex: 1; 
+        padding: 8px 12px; 
+        border: 1px solid #ddd; 
+        border-radius: 6px;
+        background: #f9f9fc; /* 默认稍微灰一点，表示只读 */
+        color: #555; 
+        font-family: monospace; 
+        font-size: 13px;
+        outline: none; 
+        height: 40px; /* 增加一点高度方便点击 */
+        box-sizing: border-box;
+        cursor: pointer; /* 🚨 鼠标变成手型 */
+        transition: all 0.2s ease;
+        text-align: left;
+    }
+    
+    /* 🚨 悬停效果：变蓝，提示可交互 */
+    .link-input:hover {
+        border-color: #007aff;
+        background: #eef6ff;
+        color: #007aff;
+        box-shadow: 0 0 0 3px rgba(0, 122, 255, 0.1);
+    }
+    
+    /* 点击效果 */
+    .link-input:active {
+        transform: scale(0.99);
+    }
+
+    /* 按钮组颜色区分 */
+    .btn-custom-common {
+        height: 30px; 
+        font-size: 13px;
+        padding: 0 14px; 
+        color: white;
+        border-radius: 6px;
+        border: none;
+        cursor: pointer;
+        font-weight: 600;
+        transition: background-color 0.2s;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        white-space: nowrap;
+    }
+
+    /* 紫色：订阅设置 */
+    .btn-color-purple { background-color: #6c5ce7; }
+    .btn-color-purple:hover { background-color: #5a4bcf; }
+    
+    /* 蓝色：节点管理 */
+    .btn-color-blue { background-color: #007aff; }
+    .btn-color-blue:hover { background-color: #0062cc; }
+
+    /* 橙色：刷新缓存 */
+    .btn-color-orange { background-color: #f5a623; }
+    .btn-color-orange:hover { background-color: #d48e1b; }
+    .btn-color-orange:disabled { background-color: #ccc; cursor: not-allowed; }
+
+    /* =========================================
+       5. 协议选择器
+       ========================================= */
+    .protocol-selector {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 15px;
+        padding: 10px 15px;
+        background-color: #f9f9fc;
+        border-radius: 8px;
+        border: 1px solid #eee;
+        align-items: center; 
+    }
+    
+    .checkbox-label {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 13px;
+        color: #555;
+        cursor: pointer;
+        user-select: none;
+    }
+    
+    .checkbox-label input[type="checkbox"] {
+        accent-color: #6c5ce7;
+        width: 16px;
+        height: 16px;
+        cursor: pointer;
+    }
+
+    /* =========================================
+       6. 模态框与Toast
+       ========================================= */
+    .modal-overlay {
+        display: none;
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0,0,0,0.5);
+        z-index: 10000;
+        align-items: center;
+        justify-content: center;
+        backdrop-filter: blur(3px);
+        opacity: 0;
+        transition: opacity 0.3s;
+    }
+    
+    .modal-overlay.active {
+        display: flex;
+        opacity: 1;
+    }
+    
+    .editor-box {
+        background: white;
+        width: 700px;
+        height: 80vh;
+        border-radius: 16px;
+        display: flex;
+        flex-direction: column;
+        padding: 20px;
+        box-shadow: 0 20px 50px rgba(0,0,0,0.2);
+        transform: scale(0.95);
+        transition: transform 0.3s, width 0.3s;
+    }
+    
+    .modal-overlay.active .editor-box {
+        transform: scale(1);
+    }
+    
+    .editor-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 15px;
+        padding-bottom: 10px;
+        border-bottom: 1px solid #eee;
+    }
+    
+    .editor-title { font-size: 18px; font-weight: 700; }
+    
+    .editor-textarea {
+        flex: 1;
+        width: 100%;
+        border: 1px solid #ddd;
+        border-radius: 8px;
+        padding: 15px;
+        font-family: 'Consolas', 'Monaco', monospace;
+        font-size: 14px;
+        line-height: 1.5;
+        color: #333;
+        background: #fafafa;
+        resize: none;
+        outline: none;
+        box-sizing: border-box;
+    }
+    
+    .editor-textarea:focus { border-color: #007aff; background: white; }
+    
+    .editor-footer { margin-top: 15px; text-align: right; }
+    
+    .btn-save {
+        background: #007aff;
+        color: white;
+        border: none;
+        padding: 10px 24px;
+        border-radius: 8px;
+        cursor: pointer;
+        font-weight: 600;
+    }
+    
+    .btn-save:hover { background: #0062cc; }
+
+    /* =========================================
+       7. 节点管理模态框专属样式
+       ========================================= */
+    #nodeManagerModal .editor-box {
+        width: 1300px; 
+        max-width: 95%;
+    }
+    
+    #nodeManagerModal .editor-box.details-open {
+        width: 1580px; 
+        max-width: 95%;
+    }
+
+    .node-manager-container {
+        display: grid;
+        grid-template-columns: 1.2fr 1.2fr 1.2fr 280px 0;
+        gap: 15px;
+        flex: 1;
+        overflow: hidden;
+        height: 100%;
+        transition: grid-template-columns 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+    }
+
+    .node-manager-container.details-open {
+        grid-template-columns: 1.2fr 1.2fr 1.2fr 280px 280px;
+    }
+
+    .node-column {
+        display: flex;
+        flex-direction: column;
+        background: #f9f9fc;
+        border: 1px solid #eee;
+        border-radius: 10px;
+        padding: 10px;
+        min-width: 0;
+        height: 100%;
+        box-sizing: border-box;
+        position: relative;
+        overflow: hidden; 
+    }
+    
+    .node-column::before {
+        content: attr(data-title);
+        display: block;
+        text-align: center;
+        font-size: 14px;
+        font-weight: 700;
+        color: #555;
+        margin-bottom: 10px;
+        padding-bottom: 5px;
+        border-bottom: 2px solid #ddd;
+        white-space: nowrap;
+    }
+    
+    #col-direct::before { border-color: #34c759; color: #34c759; }
+    #col-land::before { border-color: #f5a623; color: #f5a623; }
+    #col-blocked::before { border-color: #d74242; color: #d74242; }
+    #col-add::before { border-color: #007aff; color: #007aff; }
+    #col-details::before { border-color: #6c5ce7; color: #6c5ce7; }
+
+    #col-details {
+        background: white; 
+        border-color: #e0e0e0;
+        opacity: 0; 
+        transform: translateX(20px);
+        transition: opacity 0.2s, transform 0.2s;
+        padding: 0; 
+        display: flex;
+        flex-direction: column !important;
+        justify-content: flex-start;
+        overflow: hidden;
+    }
+    
+    #detailsContent {
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+        position: relative;
+        overflow: hidden;
+    }
+
+    .node-manager-container.details-open #col-details {
+        opacity: 1;
+        transform: translateX(0);
+        box-shadow: -5px 0 15px rgba(0,0,0,0.03); 
+        z-index: 5;
+    }
+    
+    #col-details::before { margin: 10px 10px 0 10px; }
+
+    .details-scroll-area {
+        flex: 1; 
+        overflow-y: auto; 
+        padding: 10px 10px 0 10px;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        min-height: 0;
+    }
+
+    .details-bottom-fixed {
+        flex-shrink: 0; 
+        padding: 10px;
+        background: white;
+        border-top: 1px solid #eee;
+        z-index: 10;
+        width: 100%;
+        box-sizing: border-box;
+    }
+
+    .details-action-buttons {
+        display: flex;
+        gap: 10px;
+        width: 100%;
+    }
+    
+    .btn-action-panel {
+        flex: 1;
+        padding: 10px;
+        border-radius: 6px;
+        font-size: 14px;
+        font-weight: 600;
+        cursor: pointer;
+        border: none;
+        transition: background 0.2s;
+        white-space: nowrap;
+    }
+
+    .btn-close-panel { background: #f0f0f5; color: #333; border: 1px solid #ddd; }
+    .btn-close-panel:hover { background: #e5e5ea; }
+    .btn-delete-panel { background: #ff3b30; color: white; }
+    .btn-delete-panel:hover { background: #d32f2f; }
+    .btn-save-panel { background: #34c759; color: white; }
+    .btn-save-panel:hover { background: #28a745; }
+
+    .details-node-uuid { display: none !important; }
+
+    .detail-info-group {
+        background: #f5f5f7;
+        padding: 6px 10px; 
+        border-radius: 8px;
+        flex-shrink: 0; 
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        min-height: 36px;
+        box-sizing: border-box;
+    }
+
+    .details-name-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        width: 100%;
+        height: 100%;
+    }
+    
+    .details-name-input {
+        flex: 1;
+        font-size: 16px; 
+        font-weight: 700; 
+        color: #333;
+        padding: 0 !important; 
+        margin: 0 !important; 
+        border: none !important; 
+        border-radius: 0 !important;
+        background: transparent !important;
+        background-color: transparent !important;
+        box-shadow: none !important;
+        outline: none !important;
+        -webkit-appearance: none;
+        appearance: none;
+        transition: none; 
+        margin-right: 10px !important;
+        cursor: pointer; 
+        width: 100%;
+        text-overflow: ellipsis;
+        line-height: normal; 
+    }
+    
+    .details-name-input:hover,
+    .details-name-input:focus,
+    .details-name-input:active {
+        background: transparent !important;
+        background-color: transparent !important;
+        border: none !important;
+        box-shadow: none !important; 
+        outline: none !important;
+    }
+
+    .details-name-input:focus { cursor: text; }
+
+    .node-list {
+        flex: 1;
+        overflow-y: auto;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        padding-bottom: 10px;
+    }
+
+    .node-list::-webkit-scrollbar,
+    .editor-textarea::-webkit-scrollbar,
+    .details-scroll-area::-webkit-scrollbar {
+        width: 6px;
+    }
+    .node-list::-webkit-scrollbar-thumb,
+    .editor-textarea::-webkit-scrollbar-thumb,
+    .details-scroll-area::-webkit-scrollbar-thumb {
+        background: #ccc;
+        border-radius: 3px;
+    }
+    .node-list::-webkit-scrollbar-thumb:hover,
+    .editor-textarea::-webkit-scrollbar-thumb:hover,
+    .details-scroll-area::-webkit-scrollbar-thumb:hover {
+        background: #aaa;
+    }
+
+    .node-item {
+        background: white;
+        border-radius: 6px;
+        border: 1px solid #eee;
+        font-size: 12px;
+        cursor: grab;
+        transition: all 0.2s;
+        padding: 8px 10px;
+        user-select: none;
+    }
+    
+    .node-item:active { cursor: grabbing; }
+
+    .node-item.dragging { opacity: 0.5; border: 2px dashed #007aff; background: #f0f7ff; }
+    .node-item.selected { background: #e6f2ff; border-color: #007aff; box-shadow: 0 0 0 1px #007aff inset; }
+    .node-item:hover { border-color: #007aff; background: #f0f7ff; }
+    
+    .node-content-block { display: flex; flex-direction: column; gap: 4px; pointer-events: none; }
+    .node-top-row { display: flex; align-items: center; justify-content: space-between; width: 100%; gap: 5px; }
+    .node-name-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 600; flex: 1; }
+    
+    .protocol-badges { display: flex; flex-wrap: wrap; gap: 3px; }
+    .proto-badge { font-size: 9px; padding: 1px 4px; border-radius: 3px; border: 1px solid transparent; white-space: nowrap; font-weight: 500; }
+    
+    .proto-badge.hy2, .proto-badge.hysteria2 { background: #fff3e0; color: #fb8c00; border-color: #ffe0b2; }
+    .proto-badge.vless { background: #e3f2fd; color: #1e88e5; border-color: #bbdefb; }
+    .proto-badge.vmess { background: #fce4ec; color: #d81b60; border-color: #f8bbd0; }
+    .proto-badge.trojan { background: #f3e5f5; color: #8e24aa; border-color: #e1bee7; }
+    .proto-badge.ss, .proto-badge.shadowsocks { background: #e8f5e9; color: #43a047; border-color: #c8e6c9; }
+    .proto-badge.tuic { background: #e0f7fa; color: #00acc1; border-color: #b2ebf2; }
+    .proto-badge.socks5 { background: #eceff1; color: #607d8b; border-color: #cfd8dc; }
+    .proto-badge.other { background: #f5f5f5; color: #616161; border-color: #eeeeee; }
+    
+    .db-badge { font-size: 9px; background: #eee; color: #666; padding: 1px 4px; border-radius: 3px; font-weight: 700; margin-left: 5px; }
+    .loc-badge { font-size: 9px; background: #e3f2fd; color: #1976d2; padding: 1px 4px; border-radius: 3px; font-weight: 700; margin-left: 5px; }
+
+    .add-form { display: flex; flex-direction: column; gap: 12px; z-index: 1; height: 100%; }
+    .form-group { display: flex; flex-direction: column; gap: 5px; }
+    .form-label { font-size: 12px; font-weight: 600; color: #555; }
+    .add-input, .add-select { border: 1px solid #ddd; border-radius: 6px; padding: 8px; font-size: 13px; outline: none; width: 100%; box-sizing: border-box; background: white; }
+    .add-input:focus, .add-select:focus { border-color: #007aff; }
+    .add-select { cursor: pointer; color: #333; }
+    
+    .btn-add-large {
+        background: #007aff;
+        color: white;
+        border: none;
+        padding: 10px;
+        border-radius: 6px;
+        font-size: 14px;
+        cursor: pointer;
+        width: 100%;
+        font-weight: 600;
+        transition: background 0.2s;
+        margin-top: auto;
+    }
+    .btn-add-large:hover { background: #0062cc; }
+
+    .detail-row { margin-bottom: 0px; display: flex; flex-direction: column; gap: 4px; border-bottom: 1px solid #e1e1e1; padding-bottom: 8px; }
+    .detail-row:last-child { margin-bottom: 0; border-bottom: none; padding-bottom: 0; }
+    .detail-top { display: flex; justify-content: space-between; align-items: center; }
+    .detail-proto-name { font-weight: 700; color: #333; font-size: 13px; }
+    .detail-link-box { position: relative; }
+    .detail-link { font-family: monospace; font-size: 11px; color: #555; background: white; border: 1px solid #ddd; padding: 6px; border-radius: 4px; word-break: break-all; }
+    
+    .btn-details-copy { position: absolute; right: 2px; top: 2px; font-size: 10px; padding: 2px 6px; background: #eee; border: 1px solid #ddd; border-radius: 4px; cursor: pointer; color: #333; }
+    .btn-details-copy:hover { background: #e0e0e0; }
+    
+    .btn-del-proto { font-size: 10px; color: #e74c3c; border: 1px solid #e74c3c; background: white; border-radius: 4px; padding: 1px 8px; cursor: pointer; }
+    .btn-del-proto:hover { background: #e74c3c; color: white; }
+
+    .modal-footer-buttons { display: flex; justify-content: flex-end; gap: 10px; margin-top: 10px; }
+    
+    .btn-close-modal { background: #f5f5f7; color: #333; border: 1px solid #ddd; padding: 10px 20px; border-radius: 8px; cursor: pointer; font-weight: 600; }
+    .btn-close-modal:hover { background: #e5e5e7; }
+
+    .form-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+    
+    .btn-mini { padding: 4px 10px; font-size: 12px; border-radius: 4px; border: none; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; font-weight: 500; transition: background-color 0.2s; }
+    .btn-mini-blue { background-color: #007aff; color: white; }
+    .btn-mini-blue:hover { background-color: #0062cc; }
+    .btn-mini-gray { background-color: #f0f0f5; color: #333; border: 1px solid #ddd; }
+    .btn-mini-gray:hover { background-color: #e5e5ea; }
+    .btn-mini-green { background-color: #34c759; color: white; }
+    .btn-mini-green:hover { background-color: #28a745; }
+
+    .flash-messages { position: fixed; top: 30px; left: 50%; transform: translateX(-50%); z-index: 9999; display: flex; flex-direction: column; gap: 10px; align-items: center; }
+    .alert { padding: 12px 20px; background: white; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); font-size: 14px; font-weight: 500; }
+    .alert.success { border-left: 4px solid #34c759; color: #333; }
+    .alert.error { border-left: 4px solid #d74242; color: #333; }
+    .fade-out { opacity: 0; transform: translateY(-20px); transition: all 0.3s; }
+
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="flash-messages"></div>
+<div class="container-fluid">
+    
+    <div class="dashboard-title-card">
+        <h2>订阅管理</h2>
+    </div>
+    
+    <div class="top-section-grid">
+        
+        <div class="sub-card">
+            <div class="card-header">
+                <span class="card-title">📊 节点概览</span>
+            </div>
+            
+            <div class="stats-grid">
+                <div class="stat-item">
+                    <div class="stat-num text-blue" id="totalCountDisplay">{{ stats.total }}</div>
+                    <div class="stat-label">可用总数</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-num text-green" id="directCountDisplay">{{ stats.direct|default(0) }}</div>
+                    <div class="stat-label">直连节点</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-num text-yellow" id="landCountDisplay">{{ stats.land|default(0) }}</div>
+                    <div class="stat-label">落地节点</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-num text-red" id="blockedCountDisplay">{{ stats.blocked|default(0) }}</div>
+                    <div class="stat-label">屏蔽节点</div>
+                </div>
+            </div>
+            
+            <div class="protocol-tags" id="protocolTagsContainer">
+                {% for proto, count in stats.protocols.items() %}
+                <div class="proto-tag">
+                    <span class="proto-name">{{ proto }}</span>
+                    <span class="proto-count">{{ count }}</span>
+                </div>
+                {% else %}
+                <span style="color:#999; font-size:13px;">暂无节点数据</span>
+                {% endfor %}
+            </div>
+        </div>
+
+        <div class="sub-card">
+            <div class="card-header">
+                <span class="card-title">📝 规则文件管理</span>
+                <div style="display: flex; gap: 10px;">
+                    <button class="btn-custom-common btn-color-purple" onclick="openSubSettings()">订阅链接设置</button>
+                    <button class="btn-custom-common btn-color-blue" onclick="openNodeManager()">节点管理</button>
+                    <button id="refreshStatsBtn" class="btn-custom-common btn-color-orange" onclick="refreshStats()">刷新节点缓存</button>
+                </div>
+            </div>
+            
+            <div class="rule-actions">
+                <div class="btn-edit-rule" onclick="openEditor('direct.list', false)">
+                    <span class="rule-icon">🎯</span>
+                    <span class="rule-name">直连规则</span>
+                </div>
+                <div class="btn-edit-rule" onclick="openEditor('customize.list', false)">
+                    <span class="rule-icon">⚡</span>
+                    <span class="rule-name">自定义规则</span>
+                </div>
+                <div class="btn-edit-rule" onclick="openEditor('install-singbox.sh', false)">
+                    <span class="rule-icon">📜</span>
+                    <span class="rule-name">SingBox 脚本</span>
+                </div>
+                <div class="btn-edit-rule" onclick="openEditor('clash_meta.yaml', true)">
+                    <span class="rule-icon">⚙️</span>
+                    <span class="rule-name">Clash 模板</span>
+                </div>
+            </div>
+            
+            <p style="text-align: center; font-size: 12px; color: #999; margin-top: 10px;">
+                点击图标在线编辑分流规则、脚本或配置文件模板
+            </p>
+        </div>
+    </div>
+
+    <div class="subscription-list">
+        
+        <div class="sub-card-compact">
+            <div class="card-header">
+                <span class="card-title">🚀 Clash 订阅</span>
+                <span class="card-desc-compact">全托管模式，包含规则与策略组 (Clash Verge/Meta)</span>
+            </div>
+            <div class="sub-link-row">
+                <input type="text" class="link-input" id="clashUrl" value="{{ clash_url }}" readonly 
+                       title="点击复制 Clash 订阅链接"
+                       onclick="copyToClipboard(this.value, 'Clash 订阅链接')">
+            </div>
+        </div>
+
+        <div class="sub-card-compact">
+            <div class="card-header">
+                <span class="card-title">🌌 V2Ray 订阅</span>
+                <span class="card-desc-compact">纯节点列表 (Base64)，不含规则 (v2rayN/Passwall)</span>
+            </div>
+            <div class="sub-link-row">
+                <input type="text" class="link-input" id="v2rayUrl" value="{{ v2ray_url }}" readonly
+                       title="点击复制 V2Ray 订阅链接"
+                       onclick="copyToClipboard(this.value, 'V2Ray 订阅链接')">
+            </div>
+        </div>
+
+        <div class="sub-card-expanded">
+            <div class="card-header">
+                <span class="card-title">📦 SingBox 一键安装 (链接聚合默认参数)</span>
+                <span class="card-desc-compact">选择需要的协议生成安装命令</span>
+            </div>
+            
+            <div class="protocol-selector" id="singboxProtocols">
+                <label class="checkbox-label"><input type="checkbox" value="vless" checked onchange="updateSingboxCmd()"> Vless</label>
+                <label class="checkbox-label"><input type="checkbox" value="shadowsocks" onchange="updateSingboxCmd()"> Shadowsocks</label>
+                <label class="checkbox-label"><input type="checkbox" value="hysteria2" checked onchange="updateSingboxCmd()"> Hysteria2</label>
+                <label class="checkbox-label"><input type="checkbox" value="tuic" onchange="updateSingboxCmd()"> Tuic</label>
+
+                <div style="width: 1-px; height: 16px; background: #ddd; margin: 0 10px;"></div>
+                <label class="checkbox-label" style="color: #007aff; font-weight: 600;">
+                    <input type="checkbox" id="autoReportToggle" onchange="updateSingboxCmd()"> 
+                    ☁️ 自动添加到节点列表
+                </label>
+            </div>
+
+            <div class="sub-link-row">
+                <input type="text" class="link-input" id="singboxCmd" readonly 
+                       style="color: #6c5ce7; font-weight: 500;"
+                       title="点击复制 SingBox 安装命令"
+                       onclick="copyToClipboard(this.value, 'SingBox 安装命令')">
+            </div>
+        </div>
+
+    </div>
+
+</div>
+
+<div id="subSettingsModal" class="modal-overlay">
+    <div class="editor-box" style="width: 480px; height: auto; padding: 30px;" onclick="event.stopPropagation()">
+        
+        <div style="flex: 1; display: flex; flex-direction: column; gap: 24px;">
+            
+            <div class="form-group">
+                <div class="form-header">
+                    <label class="form-label" style="font-size: 14px; margin-bottom: 0; color: #333;">固定外部访问地址</label>
+                    <button class="btn-mini btn-mini-blue" id="btnSaveDomain" onclick="saveDomainSetting()">保存地址设置</button>
+                </div>
+                <input type="text" id="settingFixedDomain" class="add-input" placeholder="" value="{{ settings.fixed_domain }}" style="background: #f9f9fc;">
+                <p style="font-size: 12px; color: #999; margin-top: 6px; line-height: 1.5;">
+                    如果不填写，系统将尝试自动检测。<br>填写后，所有订阅链接将强制使用此前缀。
+                </p>
+            </div>
+
+            <div style="border-top: 1px solid #f0f0f0;"></div>
+
+            <div class="form-group">
+                <div class="form-header">
+                    <label class="form-label" style="font-size: 14px; margin-bottom: 0; color: #333;">安全访问 Token</label>
+                    <div style="display: flex; gap: 8px;">
+                        <button id="btnRefreshToken" class="btn-mini btn-mini-gray" onclick="refreshApiToken()" title="生成新 Token">
+                            随机刷新
+                        </button>
+                        <button id="btnSaveToken" class="btn-mini btn-mini-green" onclick="saveTokenManual()" title="保存手动输入的 Token">
+                            保存 Token
+                        </button>
+                    </div>
+                </div>
+                
+                <input type="text" id="settingToken" class="add-input" value="{{ settings.api_token }}" style="font-family: monospace; color: #333;">
+                
+                <p style="font-size: 12px; color: #d74242; margin-top: 6px;">
+                    注意：修改或刷新 Token 后，旧的订阅链接将立即失效。
+                </p>
+            </div>
+
+        </div>
+
+        <div class="modal-footer-buttons" style="margin-top: 30px; padding-top: 0; border-top: none;">
+            <button class="btn-close-modal" onclick="closeSubSettings()">退出</button>
+        </div>
+    </div>
+</div>
+
+<div id="editorModal" class="modal-overlay">
+    <div class="editor-box" onclick="event.stopPropagation()">
+        <div class="editor-header">
+            <span class="editor-title" id="editorFileName">编辑文件</span>
+            <span class="close-btn" onclick="closeEditor()" style="cursor:pointer; font-size:24px;">×</span>
+        </div>
+        
+        <textarea id="fileContent" class="editor-textarea" placeholder="加载中..." spellcheck="false"></textarea>
+        <input type="hidden" id="currentFileName" data-is-template="false"> 
+
+        <div class="editor-footer">
+            <button class="btn-save" onclick="saveFile()">保存更改</button>
+        </div>
+    </div>
+</div>
+
+<div id="nodeManagerModal" class="modal-overlay">
+    <div class="editor-box" id="nodeManagerBox" onclick="event.stopPropagation()">
+        <div class="editor-header" style="border-bottom: none; margin-bottom: 5px; padding-bottom: 0;"></div>
+        
+        <div class="node-manager-container" id="nodeManagerGrid">
+            
+            <div class="node-column" id="col-direct" data-title="直连">
+                <div class="node-list" id="list-direct"></div>
+            </div>
+
+            <div class="node-column" id="col-land" data-title="落地">
+                <div class="node-list" id="list-land"></div>
+            </div>
+
+            <div class="node-column" id="col-blocked" data-title="屏蔽">
+                <div class="node-list" id="list-blocked"></div>
+            </div>
+
+            <div class="node-column" id="col-add" data-title="添加节点">
+                <div class="add-form">
+                    <div class="form-group">
+                        <label class="form-label">节点名称 (同名自动合并)</label>
+                        <input type="text" id="newNodeName" class="add-input">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">协议类型</label>
+                        <select id="newNodeProtocol" class="add-select">
+                            <option value="vless">Vless</option>
+                            <option value="hy2">Hysteria2</option>
+                            <option value="ss">Shadowsocks</option>
+                            <option value="tuic">Tuic</option>
+                            <option value="socks5">Socks5</option>
+                        </select>
+                    </div>
+                    <div class="form-group" style="flex: 1; display: flex; flex-direction: column;">
+                        <label class="form-label">节点链接</label>
+                        <textarea id="newNodeLink" class="add-input" style="flex: 1; resize: none;"></textarea>
+                    </div>
+                    <button class="btn-add-large" onclick="addLocalNode()">添加 / 合并节点</button>
+                </div>
+            </div>
+
+            <div class="node-column" id="col-details" data-title="节点详情">
+                <div id="detailsContent">
+                    <div style="height: 100%; display: flex; align-items: center; justify-content: center; color: #999;">
+                        请选择一个节点
+                    </div>
+                </div>
+            </div>
+
+        </div>
+
+        <div class="editor-footer modal-footer-buttons">
+            <button class="btn-close-modal" onclick="closeNodeManager()">退出</button>
+            <button class="btn-save" onclick="saveNodeConfig()">保存配置</button>
+        </div>
+        
+    </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+    // 定义常量
+    const modal = document.getElementById('editorModal');
+    const nodeModal = document.getElementById('nodeManagerModal');
+    const nodeManagerBox = document.getElementById('nodeManagerBox');
+    const textarea = document.getElementById('fileContent');
+    const title = document.getElementById('editorFileName');
+    const hiddenInput = document.getElementById('currentFileName');
+
+    // 协议映射表
+    const PROTOCOL_MAP = {
+        'hy2': 'Hysteria2',
+        'vless': 'VLESS',
+        'vmess': 'VMess',
+        'trojan': 'Trojan',
+        'ss': 'Shadowsocks',
+        'tuic': 'TUIC',
+        'socks5': 'Socks5',
+        'shadowsocks': 'Shadowsocks',
+        'hysteria2': 'Hysteria2'
+    };
+
+    const baseScriptUrl = "{{ script_url }}";
+    const callbackUrl = "{{ callback_url }}"; 
+
+    // 全局变量存储所有节点数据
+    let GLOBAL_NODES = {};
+
+    document.addEventListener('DOMContentLoaded', function() {
+        updateSingboxCmd();
+        setupDragColumns();
+    });
+
+    // --- SingBox 命令生成 ---
+    function updateSingboxCmd() {
+        const checkboxes = document.querySelectorAll('#singboxProtocols input[type="checkbox"]:not(#autoReportToggle):checked');
+        const autoReport = document.getElementById('autoReportToggle').checked;
+        const selectedProtocols = Array.from(checkboxes).map(cb => cb.value);
+        
+        let cmd = `bash -c "$(curl -fsSL ${baseScriptUrl})"`;
+        let args = [...selectedProtocols];
+        if (autoReport) {
+            args.push('--report', `"${callbackUrl}"`);
+        }
+        if (args.length > 0) {
+            cmd += ` -- ${args.join(' ')}`;
+        }
+        document.getElementById('singboxCmd').value = cmd;
+    }
+
+    // --- 复制函数 ---
+    function copyToClipboard(text, desc) {
+        if (!text) return;
+        
+        // 使用现代 Clipboard API
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(text).then(() => {
+                showToast(`✅ ${desc} 已复制`);
+            }).catch(err => {
+                console.error('复制失败:', err);
+                showToast('❌ 复制失败，请手动复制', 'error');
+            });
+        } else {
+            // 兼容性回退
+            const textArea = document.createElement("textarea");
+            textArea.value = text;
+            textArea.style.position = "fixed";
+            document.body.appendChild(textArea);
+            textArea.focus();
+            textArea.select();
+            
+            try {
+                const successful = document.execCommand('copy');
+                if (successful) {
+                    showToast(`✅ ${desc} 已复制`);
+                } else {
+                    showToast('❌ 浏览器不支持自动复制', 'error');
+                }
+            } catch (err) {
+                showToast('❌ 复制失败', 'error');
+            }
+            document.body.removeChild(textArea);
+        }
+    }
+
+    // 旧的复制函数 (用于详情页内)
+    function copyText(text) {
+        if (!text) return;
+        navigator.clipboard.writeText(text).then(() => {
+            showToast('✅ 已复制');
+        }).catch(() => {
+            showToast('❌ 复制失败', 'error');
+        });
+    }
+
+    // --- 刷新统计 ---
+    function refreshStats() {
+        const btn = document.getElementById('refreshStatsBtn');
+        const originalText = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = '读取中...'; 
+        
+        fetch("{{ url_for('subscription.get_stats_api') }}")
+        .then(r => r.json())
+        .then(data => {
+            if (data.status === 'success') {
+                updateStatsUI(data.stats);
+                showToast('✅ 节点缓存已刷新');
+            } else {
+                showToast('❌ 获取失败: ' + data.message, 'error');
+            }
+        })
+        .finally(() => {
+            btn.disabled = false;
+            btn.innerHTML = '刷新节点缓存'; // 保持新名称
+        });
+    }
+
+    function updateStatsUI(stats) {
+        document.getElementById('totalCountDisplay').innerText = stats.total;
+        document.getElementById('directCountDisplay').innerText = stats.direct || 0;
+        document.getElementById('landCountDisplay').innerText = stats.land || 0;
+        // 🚨 修改处：更新屏蔽节点统计
+        document.getElementById('blockedCountDisplay').innerText = stats.blocked || 0;
+        
+        const container = document.getElementById('protocolTagsContainer');
+        container.innerHTML = ''; 
+        if (!stats.protocols || Object.keys(stats.protocols).length === 0) {
+            container.innerHTML = '<span style="color:#999; font-size:13px;">暂无节点数据</span>';
+        } else {
+            const sortedProtocols = Object.entries(stats.protocols).sort(([a], [b]) => a.localeCompare(b));
+            for (const [proto, count] of sortedProtocols) {
+                container.innerHTML += `<div class="proto-tag"><span class="proto-name">${proto}</span><span class="proto-count">${count}</span></div>`;
+            }
+        }
+    }
+
+    // --- 文本编辑器逻辑 ---
+    function openEditor(filename, isTemplate = false) {
+        modal.classList.add('active');
+        const apiPath = isTemplate ? "{{ url_for('subscription.handle_rule_template') }}" : "{{ url_for('subscription.handle_rules') }}";
+        const fetchUrl = isTemplate ? apiPath : `${apiPath}?file=${filename}`;
+        title.innerText = isTemplate ? '编辑 Clash 配置模板' : `编辑 ${filename}`;
+        hiddenInput.value = filename;
+        hiddenInput.dataset.isTemplate = isTemplate; 
+        textarea.value = "加载中...";
+        textarea.disabled = true;
+
+        fetch(fetchUrl).then(r => r.json()).then(res => {
+            if (res.status === 'success') {
+                textarea.value = res.content;
+                textarea.disabled = false;
+            } else {
+                textarea.value = "加载失败";
+            }
+        });
+    }
+
+    function closeEditor() { modal.classList.remove('active'); }
+    
+    function saveFile() {
+        const filename = hiddenInput.value;
+        const isTemplate = hiddenInput.dataset.isTemplate === 'true'; 
+        const content = textarea.value;
+        const apiPath = isTemplate ? "{{ url_for('subscription.handle_rule_template') }}" : "{{ url_for('subscription.handle_rules') }}";
+        const fetchUrl = isTemplate ? apiPath : `${apiPath}?file=${filename}`;
+        
+        fetch(fetchUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ content: content })
+        }).then(r => r.json()).then(res => {
+            if (res.status === 'success') { showToast('✅ 保存成功'); closeEditor(); }
+            else { showToast('❌ 保存失败', 'error'); }
+        });
+    }
+
+    // --- 节点管理器逻辑 ---
+    function openNodeManager() {
+        nodeModal.classList.add('active');
+        document.getElementById('nodeManagerGrid').classList.remove('details-open');
+        nodeManagerBox.classList.remove('details-open'); 
+        fetchNodes();
+    }
+
+    function closeNodeManager() {
+        nodeModal.classList.remove('active');
+        nodeManagerBox.classList.remove('details-open'); 
+    }
+    
+    function closeDetailsPanel() {
+        document.getElementById('nodeManagerGrid').classList.remove('details-open');
+        nodeManagerBox.classList.remove('details-open');
+        document.querySelectorAll('.node-item').forEach(el => el.classList.remove('selected'));
+        // 延迟清空内容，避免动画时内容突然消失
+        setTimeout(() => {
+            document.getElementById('detailsContent').innerHTML = '<div style="height: 100%; display: flex; align-items: center; justify-content: center; color: #999;">请选择一个节点</div>';
+        }, 300);
+    }
+
+    function fetchNodes(preserveUuid = null) {
+        const listDirect = document.getElementById('list-direct');
+        const listBlocked = document.getElementById('list-blocked');
+        const listLand = document.getElementById('list-land');
+        
+        // 获取当前选中的UUID（如果没有传入特定UUID）
+        let targetUuid = preserveUuid;
+        if (!targetUuid) {
+            const currentSelected = document.querySelector('.node-item.selected');
+            if (currentSelected) targetUuid = currentSelected.dataset.uuid;
+        }
+
+        [listDirect, listBlocked, listLand].forEach(el => el.innerHTML = '<div style="text-align:center; padding:10px; color:#999;">加载中...</div>');
+
+        fetch("{{ url_for('subscription.get_nodes_list_api') }}")
+        .then(r => r.json())
+        .then(res => {
+            if(res.status === 'success') {
+                GLOBAL_NODES = {};
+                res.nodes.forEach(n => GLOBAL_NODES[n.uuid] = n);
+                
+                renderNodeLists(res.nodes);
+                
+                // 刷新后如果目标节点还存在，则重新选中并渲染详情
+                if(targetUuid && GLOBAL_NODES[targetUuid]) {
+                    const newItem = document.getElementById(`node-${targetUuid}`);
+                    if(newItem) newItem.classList.add('selected');
+                    
+                    document.getElementById('nodeManagerGrid').classList.add('details-open');
+                    nodeManagerBox.classList.add('details-open');
+                    // 重新渲染详情，确保数据最新
+                    renderDetailsPanel(document.getElementById('detailsContent'), GLOBAL_NODES[targetUuid]);
+                } else if (!targetUuid) {
+                    closeDetailsPanel();
+                } else {
+                    closeDetailsPanel();
+                }
+
+            } else {
+                showToast('❌ 加载节点失败: ' + res.message, 'error');
+            }
+        });
+    }
+
+    function renderNodeLists(nodes) {
+        const listDirect = document.getElementById('list-direct');
+        const listLand = document.getElementById('list-land');
+        const listBlocked = document.getElementById('list-blocked');
+        
+        listDirect.innerHTML = '';
+        listLand.innerHTML = '';
+        listBlocked.innerHTML = '';
+
+        nodes.forEach(node => {
+            const el = createNodeElement(node);
+            if (node.routing_type === 0) listDirect.appendChild(el);
+            else if (node.routing_type === 1) listLand.appendChild(el);
+            else listBlocked.appendChild(el);
+        });
+    }
+
+    function createNodeElement(node) {
+        const div = document.createElement('div');
+        div.className = `node-item`; 
+        div.id = `node-${node.uuid}`; 
+        div.dataset.uuid = node.uuid;
+        div.dataset.isLocal = node.is_local; 
+        
+        // 开启拖拽
+        div.draggable = true;
+        addDragEvents(div);
+
+        div.onclick = function() {
+            showNodeDetails(node.uuid);
+        };
+
+        let headerContent = `<div class="node-content-block">
+            <div class="node-top-row">
+                <span class="node-name-text" title="${node.name}">${node.name}</span>`;
+        
+        // 标识区分
+        if (!node.is_local) {
+            headerContent += `<span class="db-badge">DB</span>`;
+        } else {
+            headerContent += `<span class="loc-badge">LOC</span>`;
+        }
+        
+        headerContent += `</div>`; // end top-row
+
+        if (node.protocols && node.protocols.length > 0) {
+            headerContent += `<div class="protocol-badges">`;
+            node.protocols.forEach(p => {
+                const displayName = PROTOCOL_MAP[p] || p;
+                const protoClass = p.toLowerCase();
+                const knownProtos = ['vless', 'vmess', 'trojan', 'ss', 'shadowsocks', 'hy2', 'hysteria2', 'tuic', 'socks5'];
+                const badgeClass = knownProtos.includes(protoClass) ? protoClass : 'other';
+                headerContent += `<span class="proto-badge ${badgeClass}">${displayName}</span>`;
+            });
+            headerContent += `</div>`;
+        }
+        headerContent += `</div>`; 
+        
+        div.innerHTML = headerContent;
+        return div;
+    }
+
+    // 拖拽逻辑
+    let dragSrcEl = null;
+
+    function addDragEvents(item) {
+        item.addEventListener('dragstart', handleDragStart, false);
+        item.addEventListener('dragend', handleDragEnd, false);
+    }
+    
+    function setupDragColumns() {
+        const columns = document.querySelectorAll('.node-list');
+        columns.forEach(col => {
+            col.addEventListener('dragover', handleDragOver, false);
+            col.addEventListener('drop', handleDrop, false);
+        });
+    }
+
+    function handleDragStart(e) {
+        this.classList.add('dragging');
+        dragSrcEl = this;
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/html', this.innerHTML);
+        
+        // 拖动时自动选中当前节点，显示详情
+        showNodeDetails(this.dataset.uuid);
+    }
+
+    function handleDragOver(e) {
+        if (e.preventDefault) {
+            e.preventDefault(); 
+        }
+        e.dataTransfer.dropEffect = 'move';
+
+        const container = this; 
+        const afterElement = getDragAfterElement(container, e.clientY);
+        
+        if (afterElement == null) {
+            container.appendChild(dragSrcEl);
+        } else {
+            container.insertBefore(dragSrcEl, afterElement);
+        }
+        
+        return false;
+    }
+
+    function handleDrop(e) {
+        if (e.stopPropagation) {
+            e.stopPropagation();
+        }
+        return false;
+    }
+
+    function handleDragEnd(e) {
+        this.classList.remove('dragging');
+        showToast('💡 顺序已变更，请点击“保存配置”生效', 'success');
+    }
+
+    function getDragAfterElement(container, y) {
+        const draggableElements = [...container.querySelectorAll('.node-item:not(.dragging)')];
+
+        return draggableElements.reduce((closest, child) => {
+            const box = child.getBoundingClientRect();
+            const offset = y - box.top - box.height / 2;
+            if (offset < 0 && offset > closest.offset) {
+                return { offset: offset, element: child };
+            } else {
+                return closest;
+            }
+        }, { offset: Number.NEGATIVE_INFINITY }).element;
+    }
+
+
+    // --- 显示节点详情 ---
+    function showNodeDetails(uuid) {
+        const node = GLOBAL_NODES[uuid];
+        if (!node) return;
+
+        document.querySelectorAll('.node-item').forEach(el => el.classList.remove('selected'));
+        const activeEl = document.getElementById(`node-${uuid}`);
+        if (activeEl) activeEl.classList.add('selected');
+
+        const detailsContainer = document.getElementById('detailsContent');
+        renderDetailsPanel(detailsContainer, node);
+
+        document.getElementById('nodeManagerGrid').classList.add('details-open');
+        nodeManagerBox.classList.add('details-open');
+    }
+
+    function renderDetailsPanel(container, node) {
+        container.dataset.uuid = node.uuid;
+        const isDb = !node.is_local;
+        
+        // 1. 构建滚动区域 (Name Input + Links)
+        let html = `<div class="details-scroll-area">`;
+        
+        // --- 顶部信息组 (仅节点名称) ---
+        html += `
+            <div class="detail-info-group">
+                <div class="details-name-row">
+                    <input type="text" id="detailNodeName" class="details-name-input" value="${node.name.replace(/"/g, '&quot;')}" placeholder="节点名称">
+                </div>
+            </div>
+            
+            <div style="flex: 1; display: flex; flex-direction: column; gap: 10px;">
+        `;
+
+        // --- 链接列表 (协议内容) ---
+        if (node.links && Object.keys(node.links).length > 0) {
+            for (const [proto, link] of Object.entries(node.links)) {
+                const displayName = PROTOCOL_MAP[proto] || proto;
+                html += `
+                <div class="detail-row" data-protocol="${proto}">
+                    <div class="detail-top">
+                        <span class="detail-proto-name">${displayName}</span>
+                        ${!isDb ? `<button class="btn-del-proto" onclick="deleteLocalProtocol('${node.uuid}', '${proto}')">删除协议</button>` : ''}
+                    </div>
+                    <div class="detail-link-box">
+                        <div class="detail-link" ${!isDb ? 'contenteditable="true"' : ''} id="link-${node.uuid}-${proto}">${link}</div>
+                        <button class="btn-details-copy" onclick="copyText(document.getElementById('link-${node.uuid}-${proto}').innerText.trim())">复制</button>
+                    </div>
+                </div>`;
+            }
+        } else {
+            html += `<div style="padding:20px 0; text-align:center; color:#999; font-size:12px;">暂无链接详情</div>`;
+        }
+        
+        html += `</div></div>`; 
+
+        // 2. 构建底部固定区域 (Close + Delete + Save Buttons)
+        html += `
+        <div class="details-bottom-fixed">
+            <div class="details-action-buttons">
+                <button class="btn-action-panel btn-close-panel" onclick="closeDetailsPanel()">关闭</button>
+                ${node.is_local ? `<button class="btn-action-panel btn-delete-panel" onclick="deleteCurrentNode('${node.uuid}')">删除</button>` : ''}
+                <button class="btn-action-panel btn-save-panel" id="btnSaveDetailsBottom" onclick="saveNodeDetails()">保存修改</button>
+            </div>
+        </div>
+        `;
+        
+        container.innerHTML = html;
+    }
+
+    // 删除当前节点 (详情页调用)
+    function deleteCurrentNode(uuid) {
+        if(!confirm('确定要删除这个本地节点吗？所有关联的协议都会被移除。')) return;
+        
+        fetch("{{ url_for('subscription.delete_local_node_api') }}", {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ uuid: uuid })
+        })
+        .then(r => r.json())
+        .then(res => {
+            if(res.status === 'success') {
+                closeDetailsPanel();
+                const item = document.getElementById(`node-${uuid}`);
+                if(item) item.remove();
+                delete GLOBAL_NODES[uuid]; 
+                showToast('🗑️ 节点已删除');
+                refreshStats();
+            } else {
+                showToast('❌ 删除失败: ' + res.message, 'error');
+            }
+        });
+    }
+
+    // --- 节点操作逻辑 ---
+    function deleteLocalProtocol(uuid, protocol) {
+        if(!confirm(`确定要删除节点 [${GLOBAL_NODES[uuid]?.name || uuid}] 的协议 [${protocol}] 吗？`)) return;
+        
+        const currentUuid = uuid;
+
+        fetch("{{ url_for('subscription.delete_local_node_protocol_api') }}", {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ uuid: uuid, protocol: protocol })
+        })
+        .then(r => r.json())
+        .then(res => {
+            if(res.status === 'success') {
+                showToast('✅ ' + res.message);
+                refreshStats();
+                fetchNodes(currentUuid);
+            } else {
+                showToast('❌ 删除失败: ' + res.message, 'error');
+            }
+        });
+    }
+
+    function saveNodeDetails() {
+        const detailsContainer = document.getElementById('detailsContent');
+        const uuid = detailsContainer.dataset.uuid;
+        const node = GLOBAL_NODES[uuid];
+        if (!uuid || !node) {
+            showToast('❌ 无法获取节点信息', 'error');
+            return;
+        }
+
+        const btn = document.getElementById('btnSaveDetailsBottom');
+        const originalText = btn.innerText;
+        btn.innerText = '保存中...'; btn.disabled = true;
+
+        const promises = [];
+
+        // 1. 处理重命名
+        const nameInput = document.getElementById('detailNodeName');
+        const newName = nameInput.value.trim();
+        if (newName && newName !== node.name) {
+            const renameReq = fetch("{{ url_for('subscription.rename_local_node_api') }}", {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ uuid: uuid, name: newName })
+            }).then(r => r.json());
+            promises.push(renameReq);
+        }
+
+        // 2. 处理链接修改 (仅限本地节点)
+        if (node.is_local) {
+            const newLinks = {};
+            const detailRows = detailsContainer.querySelectorAll('.detail-row');
+            detailRows.forEach(row => {
+                const protocol = row.dataset.protocol;
+                const linkElement = row.querySelector(`#link-${uuid}-${protocol}`);
+                if (linkElement) {
+                    newLinks[protocol] = linkElement.innerText.trim();
+                }
+            });
+            
+            const updateLinkReq = fetch("{{ url_for('subscription.update_local_node_links_api') }}", {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ uuid: uuid, links: newLinks })
+            }).then(r => r.json());
+            promises.push(updateLinkReq);
+        }
+
+        if (promises.length === 0) {
+            showToast('⚠️ 未检测到更改');
+            btn.innerText = originalText; btn.disabled = false;
+            return;
+        }
+
+        Promise.all(promises)
+            .then(results => {
+                const errors = results.filter(r => r.status !== 'success');
+                if (errors.length > 0) {
+                    showToast('❌ 保存部分失败: ' + errors[0].message, 'error');
+                } else {
+                    showToast('✅ 所有更改已保存');
+                    fetchNodes(uuid); 
+                }
+            })
+            .catch(err => {
+                showToast('❌ 网络错误: ' + err, 'error');
+            })
+            .finally(() => {
+                if(document.body.contains(btn)) {
+                     btn.innerText = originalText; 
+                     btn.disabled = false;
+                }
+            });
+    }
+
+    function addLocalNode() {
+        const nameInput = document.getElementById('newNodeName');
+        const protocolSelect = document.getElementById('newNodeProtocol');
+        const linkInput = document.getElementById('newNodeLink');
+        
+        const name = nameInput.value.trim();
+        const protocol = protocolSelect.value;
+        const link = linkInput.value.trim();
+        
+        if(!name || !link || !protocol) {
+            showToast('⚠️ 请填写名称、选择协议并输入链接', 'error');
+            return;
+        }
+
+        const btn = document.querySelector('.btn-add-large');
+        const originalText = btn.innerText;
+        btn.innerText = '提交中...'; btn.disabled = true;
+
+        fetch("{{ url_for('subscription.add_local_node_api') }}", {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: name, protocol: protocol, link: link })
+        })
+        .then(r => r.json())
+        .then(res => {
+            if(res.status === 'success') {
+                showToast('✅ ' + res.message);
+                linkInput.value = ''; 
+                fetchNodes(); 
+                refreshStats();
+            } else {
+                showToast('❌ 添加失败: ' + res.message, 'error');
+            }
+        })
+        .finally(() => {
+            btn.innerText = originalText; btn.disabled = false;
+        });
+    }
+
+    function saveNodeConfig() {
+        const getIds = (id) => Array.from(document.getElementById(id).children)
+            .map(el => el.dataset.uuid);
+        
+        const data = {
+            direct: getIds('list-direct'),
+            land: getIds('list-land'),
+            blocked: getIds('list-blocked')
+        };
+
+        const btn = document.querySelector('#nodeManagerModal .btn-save');
+        btn.innerText = '保存中...';
+        btn.disabled = true;
+
+        fetch("{{ url_for('subscription.update_nodes_routing_api') }}", {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data)
+        })
+        .then(r => r.json())
+        .then(res => {
+            if (res.status === 'success') {
+                showToast('✅ ' + res.message);
+                closeNodeManager();
+                refreshStats(); 
+            } else {
+                showToast('❌ 保存失败: ' + res.message, 'error');
+            }
+        })
+        .finally(() => {
+            btn.innerText = '保存配置';
+            btn.disabled = false;
+        });
+    }
+
+    function showToast(message, type = 'success') {
+        const container = document.querySelector('.flash-messages');
+        const alert = document.createElement('div');
+        alert.className = `alert ${type}`;
+        alert.innerHTML = `<span>${message}</span>`;
+        container.appendChild(alert);
+        setTimeout(() => {
+            alert.classList.add('fade-out');
+            setTimeout(() => alert.remove(), 400);
+        }, 2000);
+    }
+    
+    window.onclick = function(event) {
+        if (event.target == modal) closeEditor();
+        if (event.target == nodeModal) closeNodeManager();
+        if (event.target == subSettingsModal) closeSubSettings();
+    }
+    
+    // --- 订阅设置相关 JS ---
+    const subSettingsModal = document.getElementById('subSettingsModal');
+
+    function openSubSettings() {
+        subSettingsModal.classList.add('active');
+    }
+
+    function closeSubSettings() {
+        subSettingsModal.classList.remove('active');
+    }
+
+    // 保存域名配置
+    function saveDomainSetting() {
+        const domain = document.getElementById('settingFixedDomain').value;
+        const btn = document.getElementById('btnSaveDomain');
+        const originalText = btn.innerText;
+        btn.innerText = '保存中...'; btn.disabled = true;
+
+        fetch("{{ url_for('subscription.update_settings_api') }}", {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ domain: domain })
+        })
+        .then(r => r.json())
+        .then(res => {
+            if(res.status === 'success') {
+                showToast('✅ 地址设置已保存，正在刷新...');
+                setTimeout(() => location.reload(), 1000);
+            } else {
+                showToast('❌ 保存失败', 'error');
+                btn.innerText = originalText; btn.disabled = false;
+            }
+        });
+    }
+
+    // 新增：保存手动输入的 Token
+    function saveTokenManual() {
+        const token = document.getElementById('settingToken').value.trim();
+        if (!token) {
+            showToast('⚠️ Token 不能为空', 'error');
+            return;
+        }
+
+        const btn = document.getElementById('btnSaveToken');
+        const originalText = btn.innerText;
+        btn.innerText = '保存中...'; btn.disabled = true;
+
+        fetch("{{ url_for('subscription.update_settings_api') }}", {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ api_token: token }) 
+        })
+        .then(r => r.json())
+        .then(res => {
+            if(res.status === 'success') {
+                showToast('✅ Token 已更新，正在刷新...');
+                setTimeout(() => location.reload(), 1000);
+            } else {
+                showToast('❌ 保存失败: ' + (res.message || '未知错误'), 'error');
+                btn.innerText = originalText; btn.disabled = false;
+            }
+        });
+    }
+
+    // 随机刷新 Token
+    function refreshApiToken() {
+        if(!confirm('⚠️ 警告：刷新 Token 会导致所有旧订阅链接失效！\n确定要继续吗？')) return;
+        
+        const btn = document.getElementById('btnRefreshToken');
+        const originalText = btn.innerHTML;
+        btn.innerHTML = '...';
+        btn.disabled = true;
+
+        fetch("{{ url_for('subscription.refresh_token_api') }}", {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        })
+        .then(r => r.json())
+        .then(res => {
+            if(res.status === 'success') {
+                document.getElementById('settingToken').value = res.token;
+                showToast('✅ Token 已刷新，正在刷新页面...');
+                setTimeout(() => location.reload(), 1000);
+            } else {
+                showToast('❌ 刷新失败', 'error');
+                btn.innerHTML = originalText;
+                btn.disabled = false;
+            }
+        })
+        .catch(() => {
+            btn.innerHTML = originalText;
+            btn.disabled = false;
+        });
+    }
+</script>
+{% endblock %}

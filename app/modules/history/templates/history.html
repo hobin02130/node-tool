@@ -1,0 +1,586 @@
+{% extends 'base.html' %}
+
+{% block title %}历史流量 - Node Tool{% endblock %}
+
+{% block styles %}
+<style>
+    /* --- 全局颜色定义 --- */
+    :root {
+        --color-up: #34c759;    /* 上传 - 绿色 */
+        --color-down: #007aff;  /* 下载 - 蓝色 */
+        --color-total: #9c27b0; /* 总计 - 紫色 */
+        --bg-bar: #f0f0f5;      /* 进度条背景 */
+        --color-indicator: #ff3b30; /* 选中指示器颜色 */
+    }
+
+    /* 🚨 关键修改：单独调整顶部内边距 */
+    .dashboard-container {
+        /* 上:0px (消除顶部多余空白), 右:20px, 下:20px, 左:20px */
+        padding: 0 20px 20px 20px; 
+        box-sizing: border-box;
+        width: 100%;
+        max-width: 100%;
+    }
+
+    /* --- 1. 标题栏样式 --- */
+    .dashboard-title-card {
+        height: 55px;
+        width: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        
+        /* 视觉美化 */
+        background: linear-gradient(to right, #ffffff, #f4f9ff);
+        border-radius: 12px;
+        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.03); 
+        border: 1px solid #eef1f5;
+        
+        /* 增加顶部外边距，防止贴顶太紧（如果 padding-top 设为0后太贴，这里用 margin 控制） */
+        margin-top: 0px; 
+        margin-bottom: 25px;
+        
+        box-sizing: border-box;
+        position: relative; 
+        overflow: hidden;
+    }
+
+    .dashboard-title-card h2 {
+        margin: 0;
+        font-size: 21px;
+        font-weight: 700;
+        color: #333;
+        letter-spacing: 1px;
+        z-index: 2; 
+        font-family: 'Segoe UI', system-ui, sans-serif;
+    }
+
+    /* 背景水印装饰 */
+    .dashboard-title-card::after {
+        content: '🗓️'; 
+        position: absolute;
+        right: 30px;
+        bottom: -25px;
+        font-size: 60px;
+        opacity: 0.08; 
+        transform: rotate(-15deg);
+        z-index: 1;
+        pointer-events: none; 
+        filter: grayscale(100%);
+    }
+
+    /* --- 布局系统 (CSS Grid) --- */
+    .history-grid-layout {
+        display: grid;
+        grid-template-columns: 1fr 340px; /* 左侧自适应，右侧固定宽度 */
+        gap: 20px;
+        align-items: start;
+    }
+
+    .charts-column {
+        display: flex;
+        flex-direction: column;
+        gap: 20px;
+        min-width: 0;
+    }
+
+    .list-column {
+        min-width: 0;
+    }
+
+    /* --- 卡片通用 --- */
+    .chart-card, .list-card {
+        background: white;
+        border-radius: 12px;
+        padding: 20px;
+        box-shadow: 0 4px 10px rgba(0, 0, 0, 0.05);
+        border: 1px solid #eee;
+        position: relative;
+        display: flex; 
+        flex-direction: column;
+    }
+
+    /* --- 列表卡片 (右侧竖长条) --- */
+    .list-card {
+        height: auto; 
+        overflow: visible;
+        position: sticky;
+        top: 20px;
+    }
+
+    /* --- 图表卡片 --- */
+    .chart-card { height: 450px; } 
+    
+    .chart-header {
+        display: flex; justify-content: space-between; align-items: center;
+        margin-bottom: 15px; padding-bottom: 15px; border-bottom: 1px solid #f5f5f7;
+        flex-wrap: wrap; gap: 15px;
+    }
+    .chart-title { font-size: 18px; font-weight: 700; color: #333; display: flex; align-items: center; gap: 10px; }
+    .chart-subtitle { font-size: 12px; font-weight: 400; color: #999; margin-left: 5px; }
+    
+    .controls-group { display: flex; align-items: center; gap: 10px; }
+    
+    /* 控件样式 */
+    .node-select { padding: 6px 12px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px; background-color: #f9f9f9; outline: none; min-width: 180px; }
+    .node-select:focus { border-color: var(--color-down); background: white; }
+    .date-picker { padding: 5px 10px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px; outline: none; }
+    .date-picker:focus { border-color: var(--color-down); }
+
+    .chart-wrapper { flex: 1; width: 100%; position: relative; min-height: 0; }
+    #barChart, #lineChart { width: 100%; height: 100%; }
+
+    /* --- 列表部分 --- */
+    .section-title {
+        font-size: 16px; font-weight: 600; color: #333; margin-bottom: 15px;
+        display: flex; flex-direction: column; gap: 5px;
+    }
+
+    /* 辅助文字颜色类 */
+    .text-up { color: var(--color-up); font-weight: bold; }
+    .text-down { color: var(--color-down); font-weight: bold; }
+    .text-total { color: var(--color-total); font-weight: bold; font-family: monospace; }
+    
+    .ranking-list { 
+        display: flex; flex-direction: column; gap: 0; 
+        overflow-y: visible; 
+        flex: 1; 
+        margin: 0 -20px; 
+        padding: 0 20px; 
+    }
+
+    .rank-row {
+        display: flex; flex-direction: column;
+        padding: 12px 10px; 
+        margin: 0 -10px;    
+        border-radius: 8px; 
+        border-bottom: 1px dashed #eee; 
+        gap: 8px;
+        background: transparent; 
+        cursor: pointer;
+        position: relative;
+        transition: all 0.2s ease;
+    }
+    .rank-row:last-child { border-bottom: none; }
+    
+    .rank-row.selected { background-color: transparent !important; }
+
+    .rank-row:hover {
+        background-color: white !important; 
+        transform: translateY(-3px); 
+        box-shadow: 0 4px 12px rgba(0,0,0,0.08); 
+        z-index: 10; 
+        border-bottom-color: transparent; 
+    }
+
+    .selected-indicator {
+        margin-left: 8px;
+        display: inline-flex; 
+        align-items: center;
+        justify-content: center;
+    }
+
+    .selected-icon { display: none; font-size: 0.85em; }
+    .rank-row.selected .selected-icon { display: block; }
+    
+    .rank-header-line { display: flex; justify-content: space-between; align-items: center; width: 100%; }
+    .row-name { 
+        font-size: 14px; font-weight: 600; color: #333; 
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis; 
+        display: flex; align-items: center; flex-grow: 1; max-width: 80%; 
+    }
+    .row-value { font-family: monospace; font-size: 14px; font-weight: 700; color: #333; }
+    
+    .rank-details-line { display: flex; align-items: center; width: 100%; gap: 10px; }
+    
+    .row-bar-area { flex: 1; height: 14px; display: flex; align-items: center; position: relative; }
+    
+    .progress-bg { width: 100%; height: 100%; background-color: var(--bg-bar); border-radius: 7px; position: relative; overflow: hidden; display: flex; }
+    .progress-container-inner { height: 100%; border-radius: 7px; overflow: hidden; display: flex; transition: width 0.6s ease; min-width: 2px; }
+    .bar-up { height: 100%; background-color: var(--color-up); }
+    .bar-down { height: 100%; background-color: var(--color-down); }
+
+    .progress-ratio-text {
+        position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+        font-size: 10px; color: #666; font-weight: 600; white-space: nowrap;
+        text-shadow: 0 0 2px rgba(255,255,255,0.8); pointer-events: none;
+    }
+
+    /* --- Loading --- */
+    .loading-overlay {
+        position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: rgba(255,255,255,0.9);
+        display: none; justify-content: center; align-items: center; font-size: 14px; color: #666; z-index: 50; flex-direction: column; gap: 10px;
+    }
+    .spinner { width: 24px; height: 24px; border: 3px solid #f3f3f3; border-top: 3px solid var(--color-down); border-radius: 50%; animation: spin 1s linear infinite; }
+    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+    img.emoji { height: 1.2em; width: 1.2em; margin: 0 0.1em 0 0; vertical-align: -0.2em; }
+
+    @media (max-width: 1200px) {
+        .history-grid-layout { grid-template-columns: 1fr; }
+        .list-card { height: auto; max-height: 500px; position: static; }
+    }
+</style>
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/twemoji@14.0.2/dist/twemoji.min.js"></script>
+{% endblock %}
+
+{% block content %}
+<div class="dashboard-container">
+    
+    <div class="dashboard-title-card">
+        <h2>历史流量</h2>
+    </div>
+
+    <div class="history-grid-layout">
+        
+        <div class="charts-column">
+            
+            <div class="chart-card">
+                <div class="chart-header">
+                    <div class="chart-title">
+                        📊 每小时流量消耗
+                    </div>
+                    <div class="controls-group">
+                        <input type="date" id="datePicker" class="date-picker" value="{{ default_date }}" onchange="loadData()">
+                    </div>
+                </div>
+
+                <div class="chart-wrapper">
+                    <div id="loadingMaskBar" class="loading-overlay">
+                        <div class="spinner"></div><span>加载数据...</span>
+                    </div>
+                    <div id="barChart"></div>
+                </div>
+            </div>
+
+            <div class="chart-card">
+                <div class="chart-header">
+                    <div class="chart-title">
+                        📈 累计流量趋势
+                        <span class="chart-subtitle">（当日累计使用量曲线）</span>
+                    </div>
+                </div>
+
+                <div class="chart-wrapper">
+                    <div id="loadingMaskLine" class="loading-overlay">
+                        <div class="spinner"></div><span>加载数据...</span>
+                    </div>
+                    <div id="lineChart"></div>
+                </div>
+            </div>
+
+        </div>
+
+        <div class="list-column">
+            <div class="list-card">
+                <div class="section-title">
+                    <span>🏆 本日各节点排行</span>
+                    <span style="font-size: 13px; color: #666; font-weight: normal;">
+                        总计: <span id="todayTotalDisplay" class="text-total">0.00 GB</span>
+                    </span>
+                </div>
+                
+                <div style="display: flex; justify-content: space-between; font-size: 12px; color: #999; padding-bottom: 8px; border-bottom: 1px solid #eee; margin-bottom: 5px;">
+                    <span>节点</span>
+                    <span>用量  </span>
+                </div>
+                
+                <div id="rankingContainer" class="ranking-list">
+                    </div>
+            </div>
+        </div>
+
+    </div>
+
+</div>
+<select id="nodeSelect" style="display: none;">
+    {% for node in nodes %}
+    <option value="{{ node.uuid }}">{{ node.custom_name or node.name }}</option>
+    {% endfor %}
+</select>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    let barChart = echarts.init(document.getElementById('barChart'));
+    let lineChart = echarts.init(document.getElementById('lineChart'));
+    
+    const nodeSelect = document.getElementById('nodeSelect');
+    const datePicker = document.getElementById('datePicker');
+    
+    const loadingMaskBar = document.getElementById('loadingMaskBar');
+    const loadingMaskLine = document.getElementById('loadingMaskLine');
+    
+    const rankingContainer = document.getElementById('rankingContainer');
+    const todayTotalDisplay = document.getElementById('todayTotalDisplay');
+
+    const COLOR_UP = '#34c759';
+    const COLOR_DOWN = '#007aff';
+    const COLOR_TOTAL = '#9c27b0';
+
+    // 初始选中的 UUID
+    let currentSelectedNodeUuid = nodeSelect.options.length > 0 ? nodeSelect.options[0].value : ''; 
+    
+    // 首次加载标记
+    let isFirstLoad = true;
+
+    window.addEventListener('resize', () => {
+        barChart.resize();
+        lineChart.resize();
+    });
+
+    function showLoading(show) {
+        const display = show ? 'flex' : 'none';
+        loadingMaskBar.style.display = display;
+        loadingMaskLine.style.display = display;
+    }
+
+    /**
+     * 从 API 加载数据并渲染图表
+     */
+    function loadData() {
+        let uuid = currentSelectedNodeUuid;
+        const date = datePicker.value;
+        
+        // 容错：如果全局 UUID 为空，尝试取列表第一个
+        if (!uuid && nodeSelect.options.length > 0) {
+            uuid = nodeSelect.options[0].value;
+        }
+
+        if (!uuid || !date) {
+             showLoading(false);
+             return;
+        }
+
+        showLoading(true);
+
+        fetch(`{{ url_for('history.chart_data_api') }}?uuid=${uuid}&date=${date}`)
+            .then(r => r.json())
+            .then(res => {
+                if (res.status === 'success') {
+                    
+                    // 只在 isFirstLoad 为 true 时才执行自动跳转逻辑
+                    if (isFirstLoad && res.data.ranking && res.data.ranking.length > 0) {
+                        isFirstLoad = false; // 标记首次加载已完成
+                        
+                        const topNode = res.data.ranking[0]; 
+                        // 如果当前（默认）选中的不是第一名，则跳转到第一名
+                        if (uuid !== topNode.uuid) {
+                             currentSelectedNodeUuid = topNode.uuid;
+                             // 递归调用加载正确的数据
+                             loadData(); 
+                             return; 
+                        }
+                    }
+                    
+                    // 无论是否触发跳转，只要数据返回成功，就视为加载过一次
+                    isFirstLoad = false;
+
+                    renderBarChart(res.data.bar);
+                    renderLineChart(res.data.line);
+                    renderRankingList(res.data.ranking);
+                    
+                    if (currentSelectedNodeUuid) {
+                        highlightSelectedNode(currentSelectedNodeUuid);
+                    }
+                    
+                } else {
+                    alert('加载失败: ' + res.message);
+                }
+            })
+            .catch(e => console.error(e))
+            .finally(() => showLoading(false));
+    }
+
+    function renderBarChart(data) {
+        const option = {
+            tooltip: {
+                trigger: 'axis',
+                axisPointer: { type: 'shadow' },
+                formatter: function (params) {
+                    let html = `<strong>${params[0].axisValue}</strong><br/>`;
+                    let sum = 0;
+                    params.forEach(item => {
+                        html += `${item.marker} ${item.seriesName}: <strong>${item.value}</strong> GB<br/>`;
+                        sum += item.value;
+                    });
+                    html += `<span style="display:inline-block;margin-right:4px;border-radius:10px;width:10px;height:10px;background-color:${COLOR_TOTAL};"></span> 总计: <strong>${sum.toFixed(4)}</strong> GB`;
+                    return html;
+                }
+            },
+            legend: { data: ['上传', '下载'], bottom: 0 },
+            grid: { left: '2%', right: '2%', bottom: '10%', top: '10%', containLabel: true },
+            xAxis: {
+                type: 'category', data: data.hours,
+                axisLine: { lineStyle: { color: '#ccc' } }, axisLabel: { color: '#666' }
+            },
+            yAxis: {
+                type: 'value', name: '消耗 (GB)',
+                splitLine: { lineStyle: { type: 'dashed', color: '#eee' } },
+                axisLabel: { color: '#666' }
+            },
+            series: [
+                {
+                    name: '上传', type: 'bar', stack: 'total',
+                    itemStyle: { color: COLOR_UP },
+                    data: data.up
+                },
+                {
+                    name: '下载', type: 'bar', stack: 'total',
+                    itemStyle: { color: COLOR_DOWN },
+                    data: data.down
+                }
+            ]
+        };
+        barChart.setOption(option, true);
+    }
+
+    function renderLineChart(data) {
+        const option = {
+            tooltip: {
+                trigger: 'axis',
+                axisPointer: { type: 'cross' },
+                formatter: function (params) {
+                    let html = `<strong>${params[0].axisValue}</strong><br/>`;
+                    params.forEach(item => {
+                        html += `${item.marker} ${item.seriesName}: <strong>${item.value}</strong> GB<br/>`;
+                    });
+                    return html;
+                }
+            },
+            legend: { 
+                data: ['上传', '下载', '总流量'], 
+                bottom: 0 
+            },
+            grid: { left: '2%', right: '2%', bottom: '10%', top: '10%', containLabel: true },
+            xAxis: {
+                type: 'category', boundaryGap: false, data: data.times,
+                axisLine: { lineStyle: { color: '#ccc' } }, axisLabel: { color: '#666' }
+            },
+            yAxis: {
+                type: 'value', name: '累计 (GB)',
+                splitLine: { lineStyle: { type: 'dashed', color: '#eee' } },
+                axisLabel: { color: '#666' }
+            },
+            series: [
+                {
+                    name: '上传', type: 'line', smooth: true, symbol: 'none',
+                    itemStyle: { color: COLOR_UP },
+                    areaStyle: { opacity: 0.1, color: COLOR_UP },
+                    lineStyle: { width: 2 },
+                    data: data.uploads
+                },
+                {
+                    name: '下载', type: 'line', smooth: true, symbol: 'none',
+                    itemStyle: { color: COLOR_DOWN },
+                    areaStyle: { opacity: 0.1, color: COLOR_DOWN },
+                    lineStyle: { width: 2 },
+                    data: data.downloads
+                },
+                {
+                    name: '总流量', type: 'line', smooth: true, symbol: 'none',
+                    itemStyle: { color: COLOR_TOTAL },
+                    areaStyle: { opacity: 0.05, color: COLOR_TOTAL }, 
+                    lineStyle: { width: 3 },
+                    data: data.totals
+                }
+            ]
+        };
+        lineChart.setOption(option, true);
+    }
+
+    function renderRankingList(data) {
+        rankingContainer.innerHTML = '';
+        
+        if (!data || data.length === 0) {
+            rankingContainer.innerHTML = '<div style="color:#999; padding:20px; text-align:center;">暂无数据</div>';
+            todayTotalDisplay.innerText = "0.00 GB";
+            return;
+        }
+
+        let totalUsage = 0;
+        data.forEach(item => totalUsage += item.usage);
+        todayTotalDisplay.innerText = totalUsage.toFixed(2) + " GB";
+
+        const avgUsage = totalUsage / data.length;
+        const scaleMax = avgUsage > 0 ? (avgUsage * 2) : 1; 
+
+        data.forEach(item => {
+            let totalPercent = (item.usage / scaleMax) * 100;
+            if (totalPercent > 100) totalPercent = 100;
+
+            let upPercent = 0;
+            let downPercent = 0;
+            let ratioText = "-";
+            
+            if (item.usage > 0) {
+                upPercent = (item.up / item.usage) * 100;
+                downPercent = (item.down / item.usage) * 100;
+                
+                if (item.down > 0) ratioText = (item.up / item.down).toFixed(2);
+                else ratioText = "∞"; 
+            }
+
+            let flag = (item.region || '').replace(/\s/g, '');
+            if (!flag) flag = '🌐';
+            
+            const itemUuid = item.uuid || ''; 
+
+            const html = `
+                <div class="rank-row" onclick="selectNodeByUuid('${itemUuid}')" data-uuid="${itemUuid}" title="${item.name}">
+                    <div class="rank-header-line">
+                        <div class="row-name">
+                            <span style="margin-right: 4px;">${flag}</span>
+                            <span>${item.name}</span>
+                            <span class="selected-indicator">
+                                <span class="selected-icon">✅</span>
+                            </span>
+                        </div>
+                        <div class="row-value">${item.usage.toFixed(2)} G</div>
+                    </div>
+                    
+                    <div class="rank-details-line">
+                        <div class="row-bar-area">
+                            <div class="progress-bg">
+                                <div class="progress-container-inner" style="width: ${totalPercent}%;">
+                                    <div class="bar-up" style="width: ${upPercent}%;" title="上传: ${item.up.toFixed(2)} GB"></div>
+                                    <div class="bar-down" style="width: ${downPercent}%;" title="下载: ${item.down.toFixed(2)} GB"></div>
+                                </div>
+                                <div class="progress-ratio-text">${ratioText}</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+            rankingContainer.insertAdjacentHTML('beforeend', html);
+        });
+
+        twemoji.parse(rankingContainer, { folder: 'svg', ext: '.svg' });
+    }
+
+    function highlightSelectedNode(uuid) {
+        document.querySelectorAll('.rank-row.selected').forEach(row => {
+            row.classList.remove('selected');
+        });
+
+        const selectedRow = document.querySelector(`.rank-row[data-uuid="${uuid}"]`);
+        if (selectedRow) {
+            selectedRow.classList.add('selected');
+        }
+    }
+
+    function selectNodeByUuid(uuid) {
+        if (!uuid) return;
+        nodeSelect.value = uuid;
+        currentSelectedNodeUuid = uuid;
+        loadData();
+    }
+
+    document.addEventListener('DOMContentLoaded', function() {
+        if (nodeSelect.options.length > 0) {
+             loadData();
+        }
+    });
+</script>
+{% endblock %}
