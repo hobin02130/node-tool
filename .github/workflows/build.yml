@@ -1,14 +1,13 @@
 name: Build and Release
 
-# 触发条件：推送到 main 分支，或者手动触发
+# 🟢 [修改] 触发条件：仅保留手动触发
+# 原来的 push 触发器已被删除，现在提交代码不会自动构建了
 on:
-  push:
-    branches: [ "main", "master" ]
   workflow_dispatch:
 
 jobs:
   # ----------------------------------------------------------------
-  # 任务 1: Windows 构建 (使用原生 Windows 环境)
+  # 任务 1: Windows 构建
   # ----------------------------------------------------------------
   build-windows:
     runs-on: windows-latest
@@ -19,15 +18,13 @@ jobs:
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
-        python-version: '3.10' # 推荐使用较新的稳定版
+        python-version: '3.10'
         cache: 'pip'
 
     - name: Install Dependencies
       run: |
         python -m pip install --upgrade pip
-        # 安装项目依赖
         pip install -r requirements.txt
-        # 显式安装 PyInstaller (以防 requirements.txt 里没有)
         pip install pyinstaller
 
     - name: Run Build Script
@@ -42,14 +39,12 @@ jobs:
 
   # ----------------------------------------------------------------
   # 任务 2: Linux 构建 (AMD64 和 ARM64)
-  # 使用 Docker + QEMU 实现跨架构构建
   # ----------------------------------------------------------------
   build-linux:
     runs-on: ubuntu-latest
     strategy:
       matrix:
         include:
-          # 定义两种架构的构建参数
           - arch: amd64
             platform: linux/amd64
           - arch: arm64
@@ -59,15 +54,12 @@ jobs:
     - name: Checkout Code
       uses: actions/checkout@v4
 
-    # 1. 设置 QEMU (用于模拟 ARM 架构)
     - name: Set up QEMU
       uses: docker/setup-qemu-action@v3
 
-    # 2. 设置 Docker Buildx (支持多平台构建)
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
 
-    # 3. 构建 Docker 镜像 (但不推送到仓库，仅加载到本地)
     - name: Build Docker Image
       uses: docker/build-push-action@v5
       with:
@@ -79,8 +71,6 @@ jobs:
         cache-from: type=gha
         cache-to: type=gha,mode=max
 
-    # 4. 运行容器并提取构建好的 zip 包
-    # 我们把 GitHub 的工作目录挂载到容器的 /output，然后把 zip 拷出来
     - name: Run Build and Extract
       run: |
         docker run --rm --platform ${{ matrix.platform }} \
