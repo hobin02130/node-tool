@@ -1,1 +1,13 @@
-
+# 在此文件中添加的任何域名或IP，都将走自定义规则
+#
+# 格式: 规则类型,值
+# 常用类型:
+#DOMAIN-SUFFIX : 域名后缀
+#IP-CIDR       : IP 地址或地址段
+#------------示例-指定ip-----------------
+#IP-CIDR,123.45.6.7/32
+#------------示例-指定域名-----------------
+#采取从高级到低级的匹配方式
+#如DOMAIN-SUFFIX,www.baidu.com和DOMAIN-SUFFIX,baidu.com范围不同
+#后者包括前者，但使用DOMAIN-SUFFIX,www.baidu.com是不会匹配到DOMAIN-SUFFIX,baidu.com
+#DOMAIN-SUFFIX,baidu.com
