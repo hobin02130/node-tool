@@ -62,37 +62,39 @@ function set_architecture_vars() {
     echo -e "✅ 系统架构: ${CYAN}$ARCH${NC}"
 }
 
-# ---------------------------------------------------------
-# 辅助函数：获取下载链接 (含回退机制)
-# ---------------------------------------------------------
+# 获取相应架构的最新 Release 下载链接
 function get_latest_release_url() {
     # 1. 尝试请求 "Latest" (仅返回正式版)
     API_URL="https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/releases/latest" 
     RELEASE_INFO=$(curl -s $API_URL)
     
-    # 2. 回退机制：如果找不到 Latest，获取所有 Release 列表并取第一个
+    # 2. 如果返回 "Not Found" 或 tag_name 为 null，说明没有正式版或 API 缓存未更新
+    #    此时启动回退机制：获取所有发布列表，并取第一个
     if echo "$RELEASE_INFO" | grep -q "Not Found" || [ "$(echo "$RELEASE_INFO" | jq -r .tag_name)" == "null" ]; then
         echo -e "${YELLOW}提示: 未找到 'Latest' 正式版，尝试获取最新发布的版本列表...${NC}" >&2
         API_URL_ALL="https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/releases"
+        # 获取列表并取第一个元素 [0]
         RELEASE_INFO=$(curl -s $API_URL_ALL | jq '.[0]')
     fi
     
-    # 3. 再次检查
+    # 3. 再次检查是否成功 (如果是空仓库或私有仓库，这里依然会失败)
     if echo "$RELEASE_INFO" | grep -q "Not Found" || [ "$(echo "$RELEASE_INFO" | jq -r .tag_name)" == "null" ]; then
         echo -e "${RED}错误: GitHub 仓库 $REPO_OWNER/$REPO_NAME 未找到或无任何 Release (包括预发布版)。${NC}" >&2
         exit 1
     fi
     
-    # 解析下载链接
+    # 使用 jq 解析 JSON，提取动态生成的 $ASSET_NAME 对应的链接
     LATEST_URL=$(echo "$RELEASE_INFO" | jq -r ".assets[] | select(.name == \"$ASSET_NAME\") | .browser_download_url")
 
     if [ -z "$LATEST_URL" ] || [ "$LATEST_URL" == "null" ]; then
+        # 提示用户具体缺失的是哪个架构包
         echo -e "${RED}错误: 未能在版本 [$(echo "$RELEASE_INFO" | jq -r .tag_name)] 中找到名为 '$ASSET_NAME' 的附件。${NC}" >&2
+        echo "架构需求: $TOOL_ARCH" >&2
         echo "请检查 Release 中是否存在该架构的压缩包。" >&2
         exit 1
     fi
     
-    # 输出提示信息到 stderr
+    # 输出提示信息到 stderr (>&2)，防止污染返回值
     echo -e "${YELLOW}--- 正在从 GitHub Releases 获取下载链接 ---${NC}" >&2
     echo -e "✅ 成功获取版本链接！" >&2
     echo -e "版本: $(echo "$RELEASE_INFO" | jq -r .tag_name)" >&2
@@ -106,7 +108,7 @@ function get_latest_release_url() {
 # 辅助函数：核心文件处理逻辑 (区分安装和更新)
 # ---------------------------------------------------------
 function perform_file_operations() {
-    local MODE="$1" # "install" 或 "update"
+    local MODE="$1" # 接收模式参数: "install" 或 "update"
     local TEMP_DIR="$INSTALL_DIR/temp_update" 
 
     # 1. 获取下载链接
@@ -128,7 +130,7 @@ function perform_file_operations() {
     
     if [ $? -ne 0 ]; then
         echo -e "${RED}下载失败。请检查网络连接或 GitHub API 限制。${NC}"
-        cd "$INSTALL_DIR" || cd "$HOME" 
+        cd "$INSTALL_DIR" || cd "$HOME" # 安全返回
         rm -rf "$TEMP_DIR"
         return 1
     fi
@@ -137,7 +139,7 @@ function perform_file_operations() {
     echo -e "${YELLOW}--- 正在解压文件...${NC}"
     unzip -o package.zip > /dev/null
     
-    # 查找二进制文件
+    # 查找二进制文件以确定解压后的根目录结构
     FOUND_BIN=$(find . -name "$BINARY_NAME" -type f | head -n 1)
 
     if [ -z "$FOUND_BIN" ]; then
@@ -147,12 +149,13 @@ function perform_file_operations() {
         return 1
     fi
     
+    # 确定源文件所在的目录 (可能是 . 或者某个子目录)
     SOURCE_ROOT=$(dirname "$FOUND_BIN")
 
     # 4. 根据模式执行移动操作
     echo -e "${YELLOW}--- 正在部署文件 (模式: ${CYAN}$MODE${YELLOW})...${NC}"
     
-    # 停止服务
+    # 停止服务 (如果服务已配置)
     if [ -f "/etc/systemd/system/${SERVICE_NAME}.service" ]; then
         echo -e "${CYAN}停止 NodeTool 服务...${NC}"
         $CMD_PREFIX systemctl stop $SERVICE_NAME > /dev/null 2>&1
@@ -160,14 +163,25 @@ function perform_file_operations() {
 
     if [ "$MODE" == "install" ]; then
         # === 安装模式：移动所有文件 ===
-        echo -e "执行全新安装，部署所有文件..."
+        echo -e "执行全新安装，移动所有文件..."
+        
+        # 确保安装目录存在
         mkdir -p "$INSTALL_DIR"
+        
+        # 将源目录下的所有内容移动到安装目录
+        # cp -r 覆盖移动
         cp -rf "$SOURCE_ROOT"/* "$INSTALL_DIR/"
         
     elif [ "$MODE" == "update" ]; then
         # === 更新模式：只替换二进制文件 ===
         echo -e "执行更新，仅替换二进制文件..."
+        
+        # 移动新的二进制文件覆盖旧的
         cp -f "$TEMP_DIR/$FOUND_BIN" "$INSTALL_DIR/$BINARY_NAME"
+        
+        # 可选：如果未来有其他必须更新的静态资源 (如 web 资源)，可以在这里添加
+        # 例如: cp -rf "$SOURCE_ROOT/static" "$INSTALL_DIR/"
+        
     else
         echo -e "${RED}内部错误: 未知的操作模式 '$MODE'${NC}"
         cd "$INSTALL_DIR" || cd "$HOME"
@@ -188,7 +202,7 @@ function perform_file_operations() {
 
 
 # ---------------------------------------------------------
-# 辅助函数：检查并卸载旧版本
+# 辅助函数：检查并卸载旧版本 (Clean Install)
 # ---------------------------------------------------------
 function check_and_uninstall_if_exists() {
     local SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
@@ -200,13 +214,21 @@ function check_and_uninstall_if_exists() {
         
         if [[ "$response" =~ ^([yY])$ ]]; then
             echo -e "${RED}执行完全卸载...${NC}"
+            
+            # 停止和禁用服务
             $CMD_PREFIX systemctl stop $SERVICE_NAME 2>/dev/null
             $CMD_PREFIX systemctl disable $SERVICE_NAME 2>/dev/null
             $CMD_PREFIX rm -f $SERVICE_FILE 2>/dev/null
             $CMD_PREFIX systemctl daemon-reload 2>/dev/null
+            
+            # 删除安装目录
             rm -rf $INSTALL_DIR
+            
+            # 删除控制命令
             $CMD_PREFIX rm -f $CONTROL_SCRIPT_PATH
+            
             echo -e "${GREEN}🎉 旧版本已彻底卸载。${NC}"
+            
         else
             echo -e "${CYAN}取消卸载。退出脚本。${NC}"
             exit 0
@@ -219,7 +241,9 @@ function check_and_uninstall_if_exists() {
 # 辅助函数：安装 nt 控制脚本
 # ---------------------------------------------------------
 function install_control_script() {
+    # 定义控制脚本路径
     local CONTROL_SCRIPT_PATH="/usr/local/bin/nt"
+    # 使用 heredoc 创建 nt 脚本内容
     cat <<'NT_SCRIPT_EOF' | $CMD_PREFIX tee $CONTROL_SCRIPT_PATH > /dev/null
 #!/bin/bash
 
@@ -227,18 +251,21 @@ function install_control_script() {
 SERVICE_NAME="nodetool"
 INSTALL_DIR="$HOME/nodetool"
 BIN_PATH="/usr/local/bin/nt"
+# 定义颜色
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 RED='\033[0;31m'
 CYAN='\033[0;36m'
 NC='\033[0m'
 
+# 检查是否使用 sudo
 if [ "$EUID" -ne 0 ] && command -v sudo &> /dev/null; then
     CMD_PREFIX="sudo"
 else
     CMD_PREFIX=""
 fi
 
+# 显示服务状态
 function show_status() {
     echo -e "\n${CYAN}--- ${SERVICE_NAME} 运行状态概览 ---${NC}"
     if command -v systemctl &> /dev/null; then
@@ -255,6 +282,7 @@ function show_status() {
     echo "----------------------------------"
 }
 
+# 显示详细 Systemd 状态
 function show_detailed_status() {
     echo -e "\n${CYAN}--- ${SERVICE_NAME} 详细状态 (systemctl status) ---${NC}"
     if command -v systemctl &> /dev/null; then
@@ -265,6 +293,7 @@ function show_detailed_status() {
     echo "----------------------------------"
 }
 
+# 卸载功能
 function uninstall() {
     read -r -p "警告：您确定要彻底卸载 NodeTool 吗？(这将删除服务和安装目录：$INSTALL_DIR) [y/N] " response
     if [[ "$response" =~ ^([yY])$ ]]; then
@@ -273,8 +302,13 @@ function uninstall() {
         $CMD_PREFIX systemctl disable $SERVICE_NAME > /dev/null 2>&1
         $CMD_PREFIX rm -f /etc/systemd/system/${SERVICE_NAME}.service 2>/dev/null
         $CMD_PREFIX systemctl daemon-reload > /dev/null 2>&1
+        
+        echo -e "${YELLOW}删除安装目录 $INSTALL_DIR...${NC}"
         rm -rf $INSTALL_DIR
+        
+        echo -e "${YELLOW}删除控制命令 'nt'...${NC}"
         $CMD_PREFIX rm -f $BIN_PATH
+        
         echo -e "${GREEN}🎉 NodeTool 已彻底卸载。${NC}"
         exit 0
     else
@@ -282,6 +316,7 @@ function uninstall() {
     fi
 }
 
+# 核心更新功能
 function update() {
     INSTALL_SCRIPT="$HOME/install.sh" 
     
@@ -292,6 +327,8 @@ function update() {
     fi
     
     echo -e "${CYAN}执行核心更新流程...${NC}"
+    
+    # 传入 "core-update" 参数触发 install.sh 的更新逻辑
     $CMD_PREFIX bash "$INSTALL_SCRIPT" "core-update"
     
     if [ $? -eq 0 ]; then
@@ -303,7 +340,10 @@ function update() {
     fi
 }
 
+
+# ---------------------------------------------------------
 # 主控制逻辑
+# ---------------------------------------------------------
 if [ -z "$1" ]; then
     while true; do
         echo -e "\n${GREEN}--- NodeTool 控制台 ---${NC}"
@@ -383,6 +423,7 @@ else
 fi
 NT_SCRIPT_EOF
 
+    # 赋予执行权限
     $CMD_PREFIX chmod +x $CONTROL_SCRIPT_PATH
     echo -e "✅ 'nt' 命令已安装到 $CONTROL_SCRIPT_PATH"
 }
@@ -392,7 +433,7 @@ NT_SCRIPT_EOF
 # 辅助函数：运行完整的流程 (依赖检查 -> 下载/安装)
 # ---------------------------------------------------------
 function run_full_install_flow() {
-    local OPERATION_MODE="$1" 
+    local OPERATION_MODE="$1" # "install" 或 "update"
 
     echo -e "${YELLOW} 检查系统环境...${NC}"
     DEPENDENCIES=("unzip" "curl" "wget" "pgrep" "jq" "timeout") 
@@ -434,6 +475,7 @@ function run_full_install_flow() {
         fi
     done
     
+    # 执行文件操作 (传入模式参数)
     perform_file_operations "$OPERATION_MODE"
     
     if [ $? -ne 0 ]; then
@@ -453,23 +495,27 @@ set_architecture_vars
 # 1. 判断是否为更新模式
 if [ "$1" == "core-update" ]; then
     echo -e "${YELLOW}识别到更新模式，跳过卸载检查...${NC}"
+    # 传递 "update" 模式给处理函数
     run_full_install_flow "update"
     exit 0
 fi
 
 # 2. 正常安装模式
+# 检查并卸载旧版本
 check_and_uninstall_if_exists
+
+# 传递 "install" 模式给处理函数
 run_full_install_flow "install"
 
-# 3. 配置 Systemd 和控制脚本
+# 3. 配置 Systemd 和控制脚本 (仅在安装模式下继续执行)
 echo -e "${YELLOW} 正在设置自启与控制脚本...${NC}"
 ABS_DIR=$(cd "$INSTALL_DIR" && pwd)
 CURRENT_USER=$(whoami)
 
+# 清理旧日志
 rm -f "$LOG_FILE"
 
-# 🟢 [修复关键] Systemd Service 文件：使用 /bin/bash -c 包装启动命令
-# 这能模拟手动 "cd 目录 && ./程序" 的行为，修复 ARM/Docker 环境下的路径解析问题
+# 生成 Systemd Service 文件 (使用绝对路径)
 cat <<EOF > ${SERVICE_NAME}.service
 [Unit]
 Description=NodeTool Web Service
@@ -478,13 +524,12 @@ After=network.target
 [Service]
 Type=simple
 User=$CURRENT_USER
-# 使用 bash -c 显式切换目录并运行，规避 WorkingDirectory 在部分环境失效的问题
-ExecStart=/bin/bash -c "cd $ABS_DIR && ./$BINARY_NAME"
+WorkingDirectory=$ABS_DIR
+ExecStart=$ABS_DIR/$BINARY_NAME
 Restart=always
 RestartSec=5
-# 强制直接写入日志文件
-StandardOutput=file:$LOG_FILE
-StandardError=file:$LOG_FILE
+StandardOutput=append:$LOG_FILE
+StandardError=append:$LOG_FILE
 
 [Install]
 WantedBy=multi-user.target
@@ -492,11 +537,13 @@ EOF
 
 # 如果有 root/sudo 权限，安装服务
 if [ -n "$CMD_PREFIX" ] || [ "$EUID" -eq 0 ]; then
+    # 安装服务
     $CMD_PREFIX mv ${SERVICE_NAME}.service /etc/systemd/system/${SERVICE_NAME}.service
     $CMD_PREFIX systemctl daemon-reload > /dev/null 2>&1
     $CMD_PREFIX systemctl enable ${SERVICE_NAME}
     $CMD_PREFIX systemctl restart ${SERVICE_NAME}
     echo "服务已安装并重启。"
+    # 安装 nt 脚本
     install_control_script
 else
     echo -e "${RED}警告: 无 root/sudo 权限。使用 nohup 后备模式启动。${NC}"
@@ -524,11 +571,14 @@ else
     fi
     echo -e "${CYAN}-------------------------------${NC}"
     
+    # 崩溃诊断
     echo -e "${YELLOW}--- 启动失败诊断 ---${NC}"
+    # 检查 ldd
     if command -v ldd &> /dev/null; then
         echo "依赖库检查:"
         ldd "$INSTALL_DIR/$BINARY_NAME"
     fi
+    # 检查 journalctl
     if command -v journalctl &> /dev/null; then
         echo -e "\nSystemd 日志:"
         $CMD_PREFIX journalctl -u ${SERVICE_NAME}.service -n 20 --no-pager
@@ -574,6 +624,7 @@ if [ "$HTTP_CODE" -eq 200 ] || [ "$HTTP_CODE" -eq 302 ]; then
     echo -e "✅ 本地 HTTP 请求成功 (状态码: $HTTP_CODE)"
 else
     echo -e "${RED}❌ 本地 HTTP 请求失败 (状态码: $HTTP_CODE)。${NC}"
+    # ... (后续调试输出)
     exit 1
 fi
 
