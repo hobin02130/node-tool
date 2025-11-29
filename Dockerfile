@@ -1,12 +1,12 @@
 # 使用 Python 3.9 作为基础镜像
-# 这是一个精简版的 Python 环境，适合打包
+# 使用低版本的环境编译确保兼容性
 FROM python:3.9-slim-bullseye
 
 # 设置容器内的工作目录
 WORKDIR /app
 
-# 🟢 [关键] 安装系统依赖
-# PyInstaller 和 psycopg2 (即使是 binary 版) 在 Linux 下都需要这些库
+# 安装系统依赖
+# PyInstaller 和 psycopg2
 # libpq-dev: 用于 PostgreSQL 支持
 # binutils: PyInstaller 需要
 # gcc/libc6-dev: 编译部分 Python 库可能需要
@@ -20,7 +20,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # 1. 先复制依赖文件并安装 (利用 Docker 缓存层加速构建)
 COPY requirements.txt .
 
-# 2. 安装 Python 依赖
 # --no-cache-dir: 减小镜像体积
 RUN pip install --no-cache-dir -r requirements.txt
 # 单独安装 PyInstaller (因为它可能不在 requirements.txt 里，或者是构建工具而非运行依赖)
