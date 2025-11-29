@@ -37,7 +37,7 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: NodeTool-Windows-amd64
-        # 🟢 [修改] 上传 release 文件夹。GitHub 会自动把它打包成 NodeTool-Windows-amd64.zip
+        # [修改] 上传 release 文件夹。GitHub 会自动把它打包成 NodeTool-Windows-amd64.zip
         path: release/
         retention-days: 1
 
@@ -46,6 +46,8 @@ jobs:
   # ----------------------------------------------------------------
   build-linux:
     runs-on: ubuntu-latest
+    # [优化] 设置超时时间，防止 QEMU 模拟卡死导致无限等待
+    timeout-minutes: 60
     strategy:
       matrix:
         include:
@@ -72,13 +74,15 @@ jobs:
         load: true
         tags: node-tool-builder:latest
         platforms: ${{ matrix.platform }}
-        cache-from: type=gha
-        cache-to: type=gha,mode=max
+        # [优化] 为不同架构指定独立的缓存作用域
+        # 这样 arm64 的缓存不会被 amd64 覆盖，能显著加速依赖安装过程
+        cache-from: type=gha,scope=${{ github.workflow }}-${{ matrix.arch }}
+        cache-to: type=gha,mode=max,scope=${{ github.workflow }}-${{ matrix.arch }}
 
     - name: Run Build and Extract
       run: |
         echo "Current workspace: ${{ github.workspace }}"
-        # 🟢 [修改] 不再复制 zip，而是复制 release 文件夹
+        # [修改] 不再复制 zip，而是复制 release 文件夹
         docker run --rm --platform ${{ matrix.platform }} \
         -v "${{ github.workspace }}:/output" \
         node-tool-builder:latest \
@@ -88,7 +92,7 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: NodeTool-Linux-${{ matrix.arch }}
-        # 🟢 [修改] 上传 release 文件夹
+        # [修改] 上传 release 文件夹
         path: release/
         retention-days: 1
 
@@ -108,7 +112,7 @@ jobs:
       with:
         path: release_assets
 
-    # 2. 🟢 [核心] 重新打包为 Zip
+    # 2.[核心] 重新打包为 Zip
     # 由于下载下来的是文件夹，我们需要手动将每个文件夹压缩成 zip，以便发布到 Releases
     - name: Zip Assets for Release
       run: |
