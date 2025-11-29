@@ -1,6 +1,6 @@
 # 使用 Python 3.9 作为基础镜像
 # 这是一个精简版的 Python 环境，适合打包
-FROM python:3.9-slim
+FROM python:3.9-slim-bullseye
 
 # 设置容器内的工作目录
 WORKDIR /app
