@@ -96,7 +96,7 @@ def chart_data_api():
                 
                 prev_record = r
 
-        # 🚨 [关键修复] 数据抽样 (Downsampling)
+        # 数据抽样 (Downsampling)
         # 如果数据点过多(例如超过200个)，前端渲染会非常卡顿甚至不显示
         # 我们在这里进行均匀抽样，只返回约 150 个点给前端
         MAX_POINTS = 150
