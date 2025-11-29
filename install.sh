@@ -90,7 +90,7 @@ function get_latest_release_url() {
     echo -e "${YELLOW}--- 正在从 GitHub Releases 获取最新下载链接 ---${NC}"
     echo -e "✅ 成功获取最新版本链接！"
     echo -e "版本: $(echo "$RELEASE_INFO" | jq -r .tag_name)"
-    
+    echo -e "下载链接: ${CYAN}$LATEST_URL${NC}" >&2
     echo "$LATEST_URL"
 }
 
