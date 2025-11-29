@@ -64,15 +64,22 @@ function set_architecture_vars() {
 
 # 获取相应架构的最新 Release 下载链接
 function get_latest_release_url() {
-
+    # 1. 尝试请求 "Latest" (仅返回正式版)
     API_URL="https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/releases/latest" 
-    
-    # 使用 curl 获取 JSON 数据
     RELEASE_INFO=$(curl -s $API_URL)
     
-    # 检查 API 请求是否成功
-    if echo "$RELEASE_INFO" | grep -q "Not Found"; then
-        echo -e "${RED}错误: GitHub 仓库 $REPO_OWNER/$REPO_NAME 未找到或无任何 Release。${NC}" >&2
+    # 2. 如果返回 "Not Found" 或 tag_name 为 null，说明没有正式版或 API 缓存未更新
+    #    此时启动回退机制：获取所有发布列表，并取第一个
+    if echo "$RELEASE_INFO" | grep -q "Not Found" || [ "$(echo "$RELEASE_INFO" | jq -r .tag_name)" == "null" ]; then
+        echo -e "${YELLOW}提示: 未找到 'Latest' 正式版，尝试获取最新发布的版本列表...${NC}" >&2
+        API_URL_ALL="https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/releases"
+        # 获取列表并取第一个元素 [0]
+        RELEASE_INFO=$(curl -s $API_URL_ALL | jq '.[0]')
+    fi
+    
+    # 3. 再次检查是否成功 (如果是空仓库或私有仓库，这里依然会失败)
+    if echo "$RELEASE_INFO" | grep -q "Not Found" || [ "$(echo "$RELEASE_INFO" | jq -r .tag_name)" == "null" ]; then
+        echo -e "${RED}错误: GitHub 仓库 $REPO_OWNER/$REPO_NAME 未找到或无任何 Release (包括预发布版)。${NC}" >&2
         exit 1
     fi
     
@@ -81,17 +88,19 @@ function get_latest_release_url() {
 
     if [ -z "$LATEST_URL" ] || [ "$LATEST_URL" == "null" ]; then
         # 提示用户具体缺失的是哪个架构包
-        echo -e "${RED}错误: 未能在最新 Release 中找到名为 '$ASSET_NAME' 的附件 (对应的架构是 $TOOL_ARCH)。${NC}" >&2
+        echo -e "${RED}错误: 未能在版本 [$(echo "$RELEASE_INFO" | jq -r .tag_name)] 中找到名为 '$ASSET_NAME' 的附件。${NC}" >&2
+        echo "架构需求: $TOOL_ARCH" >&2
         echo "请检查 Release 中是否存在该架构的压缩包。" >&2
         exit 1
     fi
     
-    echo -e "${YELLOW}--- 正在从 GitHub Releases 获取最新下载链接 ---${NC}" >&2
-    echo -e "✅ 成功获取最新版本链接！" >&2
+    # 输出提示信息到 stderr (>&2)，防止污染返回值
+    echo -e "${YELLOW}--- 正在从 GitHub Releases 获取下载链接 ---${NC}" >&2
+    echo -e "✅ 成功获取版本链接！" >&2
     echo -e "版本: $(echo "$RELEASE_INFO" | jq -r .tag_name)" >&2
     echo -e "下载链接: ${CYAN}$LATEST_URL${NC}" >&2
     
-    # 确保只有 LATEST_URL 通过标准输出返回，供 DOWNLOAD_URL 捕获
+    # 🟢 唯一输出到 stdout 的内容：URL
     echo "$LATEST_URL"
 }
 
