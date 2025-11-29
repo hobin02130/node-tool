@@ -5,9 +5,9 @@ from flask_login import login_required
 # 引入 update_node_custom_name 用于 DB 节点改名
 from app.utils.db_manager import get_all_nodes, update_node_details, get_config, set_config, update_node_custom_name
 import os
-import sys
-# 引入创建的路径处理工具
-from app.utils.path_helper import get_external_config_path
+import sys         # 用于判断打包环境
+import shutil      # 用于复制文件恢复模板
+from app.utils.path_helper import get_external_config_path # 引入创建的路径处理工具
 import json
 import base64
 import time
@@ -15,24 +15,63 @@ import urllib.parse
 import uuid
 from io import BytesIO
 
-# 🚨 必须安装: pip install ruamel.yaml
 from ruamel.yaml import YAML
 from .link_parser import parse_proxy_link, get_emoji_flag
 
 bp = Blueprint('subscription', __name__, url_prefix='/subscription', template_folder='templates')
 
 # ---------------------------------------------------------
-# 1. 配置与工具函数
+# 新增辅助函数：自愈机制
+# ---------------------------------------------------------
+def check_and_restore_templates(target_dir):
+    """
+    🟢 [新增] 自愈功能：检查外部目录是否缺失模板文件，如果缺失则从 exe 内部恢复
+    """
+    # 仅在打包环境 (Frozen) 下执行恢复逻辑
+    # 开发环境下 sys.frozen 为 False，直接使用源码文件，不需要恢复
+    if not getattr(sys, 'frozen', False):
+        return
+
+    # 内置资源的路径 (由 PyInstaller 解压在 _MEIPASS/bundled_templates)
+    # 这个路径对应我们在 .spec 文件里定义的 target_dir
+    base_path = sys._MEIPASS
+    source_dir = os.path.join(base_path, 'bundled_templates')
+    
+    if not os.path.exists(source_dir):
+        # 如果内置目录都不存在，说明打包有问题，跳过防止报错
+        return
+
+    # 需要检查的关键文件列表 (与 spec 文件中打包的一致)
+    critical_files = [
+        'clash_meta.yaml', 
+        'customize.list', 
+        'direct.list', 
+        'install-singbox.sh'
+    ]
+    
+    for filename in critical_files:
+        target_file = os.path.join(target_dir, filename)
+        # 如果目标文件不存在 (用户误删，或首次运行)，则从内置资源复制
+        if not os.path.exists(target_file):
+            source_file = os.path.join(source_dir, filename)
+            if os.path.exists(source_file):
+                try:
+                    shutil.copy2(source_file, target_file)
+                    print(f"[Auto-Restore] Restored missing file: {filename}")
+                except Exception as e:
+                    print(f"[Error] Failed to restore {filename}: {e}")
+
+# ---------------------------------------------------------
+# 修改后的主路径函数
 # ---------------------------------------------------------
 def get_nodes_dir():
     """
     获取节点配置文件存储目录
-    🟢 [修改] 增加打包环境判断逻辑
+    增加打包环境判断逻辑 + 自愈逻辑
     """
     if getattr(sys, 'frozen', False):
         # [打包环境]
         # 如果是 exe 运行，强制定向到 exe 同级目录下的 'nodes' 文件夹
-        # 这样用户在 exe 旁边修改 yaml/json 才会生效
         nodes_dir = get_external_config_path('nodes')
     else:
         # [开发环境]
@@ -40,10 +79,15 @@ def get_nodes_dir():
         current_dir = os.path.dirname(os.path.abspath(__file__))
         nodes_dir = os.path.join(current_dir, 'nodes')
 
-    # 如果目录不存在，尝试自动创建
+    # 1. 确保目录存在
     if not os.path.exists(nodes_dir):
         try: os.makedirs(nodes_dir)
         except OSError as e: print(f"Error creating nodes dir: {e}")
+    
+    # 2. 检查并恢复缺失的模板文件
+    # 这一步保证了即使外部 nodes 文件夹是空的，程序启动后也会自动把
+    # install-singbox.sh 等文件释放出来
+    check_and_restore_templates(nodes_dir)
     
     return nodes_dir
 
@@ -83,7 +127,7 @@ def save_local_nodes(nodes):
 
 def merge_db_to_local_json():
     """
-    🟢 [核心函数] 将数据库节点同步到本地 JSON
+    将数据库节点同步到本地 JSON
     修改点：将 DB 节点的 is_fixed 改为 False，允许前端拖拽改变分组
     """
     db_nodes = get_all_nodes()
@@ -114,7 +158,7 @@ def merge_db_to_local_json():
                 'routing_type': r_type,
                 'region': region,
                 'origin': 'db',
-                'is_fixed': False  # 🟢 [修改] 允许 DB 节点被拖拽移动
+                'is_fixed': False  # 允许 DB 节点被拖拽移动
             }
             
             for k, v in updates.items():
@@ -135,7 +179,7 @@ def merge_db_to_local_json():
                 "routing_type": r_type,
                 "region": region,
                 "origin": "db",
-                "is_fixed": False, # 🟢 [修改] 允许 DB 节点被拖拽移动
+                "is_fixed": False, # 允许 DB 节点被拖拽移动
                 "sort_index": 99999
             }
             local_nodes.append(new_node)
@@ -169,7 +213,7 @@ def merge_db_to_local_json():
 def sync_nodes_to_files():
     """
     生成 0.yaml 和 1.yaml
-    🟢 修复：强制将 YAML 中的 name 字段重写为 'Flag Proto-Name' 格式
+    强制将 YAML 中的 name 字段重写为 'Flag Proto-Name' 格式
     """
     # 1. 获取最新合并后的节点列表
     all_nodes = merge_db_to_local_json()
@@ -204,11 +248,9 @@ def sync_nodes_to_files():
                 proxy_dict = parse_proxy_link(link.strip(), display_name, region)
                 
                 if proxy_dict:
-                    # 🟢 [Bug 修复关键点] 
                     # 无论 parse_proxy_link 返回的 name 是什么（可能是旧的后缀格式），
                     # 这里强制将其覆盖为我们刚刚构造的前缀格式。
                     proxy_dict['name'] = display_name
-                    
                     proxies_map[r_type].append(proxy_dict)
                     count_summary[r_type] += 1
 
@@ -217,6 +259,7 @@ def sync_nodes_to_files():
     yaml = YAML()
     yaml.preserve_quotes = True
     yaml.indent(mapping=2, sequence=4, offset=2)
+    # 4096是为了组合模板时候不被截断
     yaml.width = 4096
 
     try:
@@ -232,7 +275,7 @@ def sync_nodes_to_files():
 # 4. 统计逻辑
 # ---------------------------------------------------------
 def get_stats_data():
-    """获取统计信息：🟢 修改为统一从合并列表获取"""
+    """获取统计信息：修改为统一从合并列表获取"""
     # 触发同步，获取全量数据
     all_nodes = merge_db_to_local_json()
 
@@ -341,7 +384,7 @@ def refresh_token_api():
 def download_clash_config():
     """下载 Clash 配置文件"""
     verify_request_token()
-    sync_nodes_to_files() # 🟢 触发同步
+    sync_nodes_to_files() # 触发同步
     
     try:
         base_url = get_base_url()
@@ -391,7 +434,7 @@ def download_singbox_script():
 @bp.route('/api/stats')
 @login_required
 def get_stats_api():
-    """API: 获取最新统计数据 (🟢 内部触发同步)"""
+    """API: 获取最新统计数据 (内部触发同步)"""
     try:
         # 这一步会执行：DB/Local -> local_nodes.json -> 0.yaml/1.yaml
         success, message = sync_nodes_to_files() 
@@ -412,7 +455,7 @@ def sync_files_api():
     return jsonify({'status': 'success' if success else 'error', 'message': message})
 
 # ---------------------------------------------------------
-# 节点管理 API (🟢 统一管理 DB 和 Local)
+# 节点管理 API (统一管理 DB 和 Local)
 # ---------------------------------------------------------
 
 @bp.route('/api/nodes/list', methods=['GET'])
@@ -420,7 +463,7 @@ def sync_files_api():
 def get_nodes_list_api():
     """
     API: 获取节点列表
-    🟢 修改：调用 merge_db_to_local_json 获取统一列表并按 sort_index 排序
+    修改：调用 merge_db_to_local_json 获取统一列表并按 sort_index 排序
     """
     try:
         nodes = merge_db_to_local_json() # 获取最新同步数据
@@ -475,7 +518,7 @@ def add_local_node_api():
 def rename_local_node_api():
     """
     API: 重命名节点
-    🟢 修改：根据 origin 判断调用 DB 函数还是修改本地 JSON
+    修改：根据 origin 判断调用 DB 函数还是修改本地 JSON
     """
     try:
         data = request.get_json()
@@ -489,11 +532,11 @@ def rename_local_node_api():
         if not target_node: return jsonify({'status': 'error', 'message': '未找到节点'}), 404
             
         if target_node.get('origin') == 'db':
-            # 🟢 DB 节点：调用数据库更新
+            # DB 节点：调用数据库更新
             success = update_node_custom_name(target_uuid, new_name)
             if not success: return jsonify({'status': 'error', 'message': '数据库更新失败'}), 500
         else:
-            # 🟢 Local 节点：直接更新 JSON
+            # Local 节点：直接更新 JSON
             target_node['name'] = new_name
             save_local_nodes(local_nodes)
             
@@ -512,7 +555,7 @@ def update_local_node_links_api():
         node = next((n for n in local_nodes if n['uuid'] == uuid_val), None)
         
         if not node: return jsonify({'status': 'error', 'message': '节点不存在'}), 404
-        # 🟢 防止修改 DB 节点链接
+        # 防止修改 DB 节点链接
         if node.get('origin') == 'db': return jsonify({'status': 'error', 'message': '数据库节点链接不可在此修改'}), 403
         
         cleaned = {k: v for k, v in links.items() if v and v.strip()}
@@ -576,7 +619,7 @@ def delete_local_node_protocol_api():
 def update_nodes_routing_api():
     """
     API: 更新节点排序和分组
-    🟢 修改：支持 DB 节点的分组修改。
+    修改：支持 DB 节点的分组修改。
     如果检测到 DB 节点的分组(routing_type)发生变化，自动同步回数据库。
     """
     try:
@@ -603,7 +646,7 @@ def update_nodes_routing_api():
                     # 如果分组发生了变化
                     if old_type != type_code:
                         if node.get('origin') == 'db':
-                            # 🟢 [核心修改] DB 节点：调用数据库函数更新 routing_type
+                            # [核心修改] DB 节点：调用数据库函数更新 routing_type
                             # update_node_details 需要完整信息，我们从 local_nodes 中读取当前的 links 和 name
                             success = update_node_details(
                                 uuid_val, 
@@ -631,7 +674,7 @@ def update_nodes_routing_api():
 def download_v2ray_base64():
     """下载 Base64 订阅"""
     verify_request_token()
-    # 🟢 统一从 merged 列表获取，确保顺序正确
+    # 统一从 merged 列表获取，确保顺序正确
     nodes = merge_db_to_local_json()
     nodes.sort(key=lambda x: x.get('sort_index', 0))
     
