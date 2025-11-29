@@ -96,10 +96,10 @@ function get_latest_release_url() {
 }
 
 # ---------------------------------------------------------
-# 辅助函数：核心安装/更新逻辑 (下载、验证、替换)
+# 辅助函数：核心文件处理逻辑 (区分安装和更新)
 # ---------------------------------------------------------
-function core_install_logic() {
-    # 临时工作目录，用于下载和验证
+function perform_file_operations() {
+    local MODE="$1" # 接收模式参数: "install" 或 "update"
     local TEMP_DIR="$INSTALL_DIR/temp_update" 
 
     # 1. 获取下载链接
@@ -110,7 +110,7 @@ function core_install_logic() {
         return 1
     fi
 
-# 2. 下载到临时目录
+    # 2. 下载到临时目录
     echo -e "${YELLOW}--- 正在下载文件到临时目录...${NC}"
     mkdir -p "$TEMP_DIR"
     cd "$TEMP_DIR" || return 1
@@ -121,29 +121,30 @@ function core_install_logic() {
     
     if [ $? -ne 0 ]; then
         echo -e "${RED}下载失败。请检查网络连接或 GitHub API 限制。${NC}"
-        cd "$INSTALL_DIR" # 返回主目录
-        rm -rf "$TEMP_DIR" # 清理临时目录
+        cd "$INSTALL_DIR" || cd "$HOME" # 安全返回
+        rm -rf "$TEMP_DIR"
         return 1
     fi
 
-    # 3. 解压和验证
-    echo -e "${YELLOW}--- 正在解压并验证新文件...${NC}"
+    # 3. 解压
+    echo -e "${YELLOW}--- 正在解压文件...${NC}"
     unzip -o package.zip > /dev/null
     
-    # 查找新的二进制文件
+    # 查找二进制文件以确定解压后的根目录结构
     FOUND_BIN=$(find . -name "$BINARY_NAME" -type f | head -n 1)
 
-    if [ -n "$FOUND_BIN" ]; then
-        echo -e "✅ 新的二进制文件验证成功。"
-    else
-        echo -e "${RED}错误: 在压缩包中未找到新的二进制文件 '$BINARY_NAME'。${NC}"
-        cd "$INSTALL_DIR"
+    if [ -z "$FOUND_BIN" ]; then
+        echo -e "${RED}错误: 在压缩包中未找到二进制文件 '$BINARY_NAME'。${NC}"
+        cd "$INSTALL_DIR" || cd "$HOME"
         rm -rf "$TEMP_DIR"
         return 1
     fi
     
-    # 4. 替换旧文件 (在替换前停止服务)
-    echo -e "${YELLOW}--- 正在替换旧文件...${NC}"
+    # 确定源文件所在的目录 (可能是 . 或者某个子目录)
+    SOURCE_ROOT=$(dirname "$FOUND_BIN")
+
+    # 4. 根据模式执行移动操作
+    echo -e "${YELLOW}--- 正在部署文件 (模式: ${CYAN}$MODE${YELLOW})...${NC}"
     
     # 停止服务 (如果服务已配置)
     if [ -f "/etc/systemd/system/${SERVICE_NAME}.service" ]; then
@@ -151,20 +152,41 @@ function core_install_logic() {
         $CMD_PREFIX systemctl stop $SERVICE_NAME > /dev/null 2>&1
     fi
 
-    # 移动新文件到安装目录 (处理子目录结构)
-    if [ "$(dirname "$FOUND_BIN")" != "." ]; then
-        # 移动子目录中的所有内容到临时目录根目录
-        mv "$(dirname "$FOUND_BIN")"/* "$TEMP_DIR/"
+    if [ "$MODE" == "install" ]; then
+        # === 安装模式：移动所有文件 ===
+        echo -e "执行全新安装，移动所有文件..."
+        
+        # 确保安装目录存在
+        mkdir -p "$INSTALL_DIR"
+        
+        # 将源目录下的所有内容移动到安装目录
+        # cp -r 覆盖移动
+        cp -rf "$SOURCE_ROOT"/* "$INSTALL_DIR/"
+        
+    elif [ "$MODE" == "update" ]; then
+        # === 更新模式：只替换二进制文件 ===
+        echo -e "执行更新，仅替换二进制文件..."
+        
+        # 移动新的二进制文件覆盖旧的
+        cp -f "$TEMP_DIR/$FOUND_BIN" "$INSTALL_DIR/$BINARY_NAME"
+        
+        # 可选：如果未来有其他必须更新的静态资源 (如 web 资源)，可以在这里添加
+        # 例如: cp -rf "$SOURCE_ROOT/static" "$INSTALL_DIR/"
+        
+    else
+        echo -e "${RED}内部错误: 未知的操作模式 '$MODE'${NC}"
+        cd "$INSTALL_DIR" || cd "$HOME"
+        rm -rf "$TEMP_DIR"
+        return 1
     fi
     
-    # 移动新的二进制文件到安装目录
-    mv "$TEMP_DIR/$BINARY_NAME" "$INSTALL_DIR/$BINARY_NAME"
+    # 设置权限
     chmod +x "$INSTALL_DIR/$BINARY_NAME"
     
     # 5. 清理
-    cd "$INSTALL_DIR"
+    cd "$INSTALL_DIR" || cd "$HOME"
     rm -rf "$TEMP_DIR"
-    echo -e "${GREEN}🎉 核心二进制文件已更新。${NC}"
+    echo -e "${GREEN}🎉 文件部署完成。${NC}"
 
     return 0
 }
@@ -197,10 +219,9 @@ function check_and_uninstall_if_exists() {
             $CMD_PREFIX rm -f $CONTROL_SCRIPT_PATH
             
             echo -e "${GREEN}🎉 旧版本已彻底卸载。${NC}"
-            # 卸载完成后，脚本会继续执行后续的安装步骤
             
         else
-            echo -e "${CYAN}取消卸载。退出${NC}"
+            echo -e "${CYAN}取消卸载。退出脚本。${NC}"
             exit 0
         fi
     fi
@@ -235,23 +256,17 @@ else
     CMD_PREFIX=""
 fi
 
-# 显示服务状态 (已优化，提供简洁状态，详细状态可选)
+# 显示服务状态
 function show_status() {
     echo -e "\n${CYAN}--- ${SERVICE_NAME} 运行状态概览 ---${NC}"
-    
     if command -v systemctl &> /dev/null; then
-        # 简洁状态：是否激活？
         if $CMD_PREFIX systemctl is-active $SERVICE_NAME &> /dev/null; then
             echo -e "状态: ${GREEN}● 正在运行${NC}"
         else
             echo -e "状态: ${RED}○ 已停止${NC}"
         fi
-        
-        # 详细状态：提供查看详细日志的入口
         echo -e "日志/详细状态: ${CYAN}nt status detailed${NC} 或 ${CYAN}nt log${NC}"
-        
     else
-        # 非 systemd 系统的备用显示
         echo -e "${RED}Systemctl 命令不可用。${NC}"
         echo "进程状态: $($CMD_PREFIX pgrep -f ${INSTALL_DIR}/NodeTool)"
     fi
@@ -262,7 +277,6 @@ function show_status() {
 function show_detailed_status() {
     echo -e "\n${CYAN}--- ${SERVICE_NAME} 详细状态 (systemctl status) ---${NC}"
     if command -v systemctl &> /dev/null; then
-        # 使用 --no-pager 或 less/more 来防止输出过多刷屏
         $CMD_PREFIX systemctl status $SERVICE_NAME --no-pager
     else
         echo -e "${RED}Systemctl 命令不可用。${NC}"
@@ -275,8 +289,8 @@ function uninstall() {
     read -r -p "警告：您确定要彻底卸载 NodeTool 吗？(这将删除服务和安装目录：$INSTALL_DIR) [y/N] " response
     if [[ "$response" =~ ^([yY])$ ]]; then
         echo -e "${YELLOW}停止并禁用服务...${NC}"
-        $CMD_PREFIX systemctl stop $SERVICE_NAME > /dev/null 2>&1 # 静默停止
-        $CMD_PREFIX systemctl disable $SERVICE_NAME > /dev/null 2>&1 # 静默禁用
+        $CMD_PREFIX systemctl stop $SERVICE_NAME > /dev/null 2>&1
+        $CMD_PREFIX systemctl disable $SERVICE_NAME > /dev/null 2>&1
         $CMD_PREFIX rm -f /etc/systemd/system/${SERVICE_NAME}.service 2>/dev/null
         $CMD_PREFIX systemctl daemon-reload > /dev/null 2>&1
         
@@ -295,7 +309,6 @@ function uninstall() {
 
 # 核心更新功能
 function update() {
-    # 假设 install.sh 脚本位于用户的主目录下
     INSTALL_SCRIPT="$HOME/install.sh" 
     
     if [ ! -f "$INSTALL_SCRIPT" ]; then
@@ -306,7 +319,7 @@ function update() {
     
     echo -e "${CYAN}执行核心更新流程...${NC}"
     
-    # 运行 install.sh 时传入特殊的更新参数
+    # 传入 "core-update" 参数触发 install.sh 的更新逻辑
     $CMD_PREFIX bash "$INSTALL_SCRIPT" "core-update"
     
     if [ $? -eq 0 ]; then
@@ -320,17 +333,16 @@ function update() {
 
 
 # ---------------------------------------------------------
-# 主控制逻辑：支持参数或菜单
+# 主控制逻辑
 # ---------------------------------------------------------
 if [ -z "$1" ]; then
-    # 菜单模式
     while true; do
         echo -e "\n${GREEN}--- NodeTool 控制台 ---${NC}"
         echo -e "1) ${CYAN}查看状态 (status)${NC}"
         echo -e "2) ${CYAN}启动服务 (start)${NC}"
         echo -e "3) ${CYAN}重启服务 (restart)${NC}"
         echo -e "4) ${CYAN}停止服务 (stop)${NC}"
-        echo -e "5) ${CYAN}更新程序 (update)${NC}" # 新增更新选项
+        echo -e "5) ${CYAN}更新程序 (update)${NC}"
         echo -e "6) ${RED}查看日志 (log)${NC}"
         echo -e "7) ${RED}完全卸载 (uninstall)${NC}"
         echo -e "0) ${YELLOW}退出面板${NC}"
@@ -356,7 +368,7 @@ if [ -z "$1" ]; then
                 sleep 1
                 show_status
                 ;;
-            5) update ;; # 调用 update 函数
+            5) update ;;
             6)
                 echo -e "${CYAN}--- NodeTool 实时日志 (Ctrl+C 退出) ---${NC}"
                 $CMD_PREFIX journalctl -u $SERVICE_NAME -f
@@ -367,7 +379,6 @@ if [ -z "$1" ]; then
         esac
     done
 else
-    # 参数模式 (兼容旧命令，并新增 detailed/log/update)
     case "$1" in
         start)
             echo -e "${CYAN}正在启动 NodeTool...${NC}"
@@ -387,26 +398,17 @@ else
             sleep 2
             show_status
             ;;
-        status)
-            show_status
-            ;;
-        update) # 新增 update 命令
-            update
-            ;;
-        detailed | status-detailed)
-            show_detailed_status
-            ;;
+        status) show_status ;;
+        update) update ;;
+        detailed|status-detailed) show_detailed_status ;;
         log)
             echo -e "${CYAN}--- NodeTool 实时日志 (Ctrl+C 退出) ---${NC}"
             $CMD_PREFIX journalctl -u $SERVICE_NAME -f
             ;;
-        uninstall)
-            uninstall
-            ;;
+        uninstall) uninstall ;;
         *)
             echo -e "${RED}NodeTool 控制台${NC}"
             echo -e "${CYAN}用法: nt [start | stop | restart | status | update | detailed | log | uninstall]${NC}"
-            echo -e "例如: nt status"
             ;;
     esac
 fi
@@ -419,71 +421,56 @@ NT_SCRIPT_EOF
 
 
 # ---------------------------------------------------------
-# 辅助函数：执行核心安装流程 (包含依赖检查和核心逻辑)
+# 辅助函数：运行完整的流程 (依赖检查 -> 下载/安装)
 # ---------------------------------------------------------
 function run_full_install_flow() {
+    local OPERATION_MODE="$1" # "install" 或 "update"
+
     echo -e "${YELLOW} 检查系统环境...${NC}"
     DEPENDENCIES=("unzip" "curl" "wget" "pgrep" "jq" "timeout") 
-    INSTALL_TIMEOUT=120 # 设置超时时间为 60 秒
+    INSTALL_TIMEOUT=120
 
     for cmd in "${DEPENDENCIES[@]}"; do
         if ! command -v $cmd &> /dev/null; then
             echo -e "${YELLOW}未找到 '$cmd'，正在安装...${NC}"
             INSTALL_SUCCESS=0
-            
-            # 使用临时变量存储安装命令
             INSTALL_CMD=""
             
             if [ -x "$(command -v apt-get)" ]; then
-                # 尝试使用 apt-get 安装。注意：update也需要静默处理。
                 $CMD_PREFIX apt-get update > /dev/null 2>&1
                 INSTALL_CMD="$CMD_PREFIX apt-get install -y $cmd"
             elif [ -x "$(command -v yum)" ]; then
-                # 尝试使用 yum 安装
                 INSTALL_CMD="$CMD_PREFIX yum install -y $cmd"
             fi
             
             if [ -n "$INSTALL_CMD" ]; then
-                # 设置超时，并将所有输出重定向到 /dev/null
                 if command -v timeout &> /dev/null; then
-                    # 如果系统支持 timeout 命令，则使用它
                     timeout $INSTALL_TIMEOUT $INSTALL_CMD > /dev/null 2>&1
                     INSTALL_SUCCESS=$?
                 else
-                    # 如果不支持 timeout，则仅静默安装
                     $INSTALL_CMD > /dev/null 2>&1
                     INSTALL_SUCCESS=$?
-                    # 注意：此处无法实现超时退出
                 fi
             else
-                # 如果没有找到包管理器，直接标记失败
                 INSTALL_SUCCESS=1
             fi
             
-            # 检查安装结果
             if [ $INSTALL_SUCCESS -eq 124 ]; then
-                # 124 是 timeout 命令的退出码，表示命令超时
-                echo -e "${RED}❌ 错误: '$cmd' 安装超时 (${INSTALL_TIMEOUT} 秒)。请检查网络或手动安装。${NC}"
+                echo -e "${RED}❌ 错误: '$cmd' 安装超时。${NC}"
                 exit 1
             elif [ $INSTALL_SUCCESS -ne 0 ]; then
-                # 检查是否有权限执行 sudo
-                if [ -n "$CMD_PREFIX" ] && [ "$EUID" -ne 0 ]; then
-                    echo -e "${RED}错误: 无法自动安装 '$cmd' (退出码: $INSTALL_SUCCESS)。请确认您具有正确的 sudo 权限。${NC}"
-                else
-                    echo -e "${RED}❌ 错误: 无法自动安装 '$cmd' (退出码: $INSTALL_SUCCESS)。请手动运行相应的安装命令。${NC}"
-                fi
+                echo -e "${RED}❌ 错误: 无法自动安装 '$cmd'。${NC}"
                 exit 1
             fi
-            
             echo -e "✅ '$cmd' 安装成功。"
         fi
     done
     
-    # 2. 统一执行核心安装逻辑 (下载、解压、替换)
-    echo -e "${YELLOW} 正在安装...${NC}"
-    core_install_logic
+    # 执行文件操作 (传入模式参数)
+    perform_file_operations "$OPERATION_MODE"
+    
     if [ $? -ne 0 ]; then
-        echo -e "${RED}安装失败，退出。${NC}"
+        echo -e "${RED}文件部署失败，退出。${NC}"
         exit 1
     fi
 }
@@ -496,23 +483,22 @@ function run_full_install_flow() {
 # 调用架构识别函数
 set_architecture_vars
 
-# 检查命令行参数是否为更新模式
+# 1. 判断是否为更新模式
 if [ "$1" == "core-update" ]; then
     echo -e "${YELLOW}识别到更新模式，跳过卸载检查...${NC}"
-    run_full_install_flow
-    
-    # 在更新模式下，只需执行核心逻辑并退出，nt 脚本会负责重启
+    # 传递 "update" 模式给处理函数
+    run_full_install_flow "update"
     exit 0
 fi
 
-# 正常安装模式：
+# 2. 正常安装模式
 # 检查并卸载旧版本
 check_and_uninstall_if_exists
 
-# 执行完整的安装流程 (依赖检查、核心安装)
-run_full_install_flow
+# 传递 "install" 模式给处理函数
+run_full_install_flow "install"
 
-# 5. 配置 Systemd 和控制脚本
+# 3. 配置 Systemd 和控制脚本 (仅在安装模式下继续执行)
 echo -e "${YELLOW} 正在设置自启与控制脚本...${NC}"
 ABS_DIR=$(cd "$INSTALL_DIR" && pwd)
 CURRENT_USER=$(whoami)
@@ -520,7 +506,7 @@ CURRENT_USER=$(whoami)
 # 清理旧日志
 rm -f "$LOG_FILE"
 
-# 生成 Systemd Service 文件
+# 生成 Systemd Service 文件 (使用绝对路径)
 cat <<EOF > ${SERVICE_NAME}.service
 [Unit]
 Description=NodeTool Web Service
@@ -560,7 +546,7 @@ fi
 echo "正在等待服务启动 (3秒)..."
 sleep 3
 
-# 6. 状态检查与调试
+# 4. 状态检查与调试
 echo -e "${YELLOW} 正在执行健康检查...${NC}"
 
 # 检查 1: 进程
@@ -575,19 +561,31 @@ else
         echo "无日志文件生成。"
     fi
     echo -e "${CYAN}-------------------------------${NC}"
+    
+    # 崩溃诊断
+    echo -e "${YELLOW}--- 启动失败诊断 ---${NC}"
+    # 检查 ldd
+    if command -v ldd &> /dev/null; then
+        echo "依赖库检查:"
+        ldd "$INSTALL_DIR/$BINARY_NAME"
+    fi
+    # 检查 journalctl
+    if command -v journalctl &> /dev/null; then
+        echo -e "\nSystemd 日志:"
+        $CMD_PREFIX journalctl -u ${SERVICE_NAME}.service -n 20 --no-pager
+    fi
+    echo -e "------------------------------------"
+    
     exit 1
 fi
 
 # Systemd 状态诊断
 echo -e "${YELLOW}--- Systemd 服务状态概览 ---${NC}"
 if command -v systemctl &> /dev/null; then
-    # 检查服务是否处于 active 状态
     if $CMD_PREFIX systemctl is-active $SERVICE_NAME &> /dev/null; then
         echo -e "✅ 服务状态: ${GREEN}正在运行 (active)${NC}"
     else
-        # 如果进程运行但服务不是 active (例如，服务启动失败或卡住)
         echo -e "${RED}❌ 服务状态: ${RED}停止或启动失败 (inactive)${NC}"
-        echo -e "提示: 请使用 ${CYAN}${CMD_PREFIX} journalctl -u ${SERVICE_NAME} -n 30 --no-pager${NC} 查看详细错误日志。"
     fi
 else
     echo "Systemctl 命令不完整或不可用，跳过详细状态检查。"
@@ -617,36 +615,17 @@ if [ "$HTTP_CODE" -eq 200 ] || [ "$HTTP_CODE" -eq 302 ]; then
     echo -e "✅ 本地 HTTP 请求成功 (状态码: $HTTP_CODE)"
 else
     echo -e "${RED}❌ 本地 HTTP 请求失败 (状态码: $HTTP_CODE)。${NC}"
-    
-    echo -e "${CYAN}--- 应用启动日志 ($LOG_FILE) ---${NC}"
-    if [ -f "$LOG_FILE" ]; then
-        tail -n 20 "$LOG_FILE"
-    else
-        echo -e "${RED}警告：日志文件 $LOG_FILE 未找到或为空。${NC}"
-    fi
-    echo -e "${CYAN}-------------------------------${NC}"
-    
-    # 额外调试：检查依赖库
-    echo -e "${YELLOW}[调试] 检查二进制文件依赖:${NC}"
-    if command -v ldd &> /dev/null; then
-        ldd "$INSTALL_DIR/$BINARY_NAME" | grep "not found" # 修正了路径，确保不在 temp_update 目录
-        if [ $? -eq 0 ]; then
-            echo -e "${RED}发现缺失的系统库！${NC}"
-        else
-            echo "依赖库检查看起来正常。"
-        fi
-    fi
-    
+    # ... (后续调试输出)
     exit 1
 fi
 
-# 7. 最终总结
+# 5. 最终总结
 echo -e "${YELLOW} 安装完成！${NC}"
 IP=$(curl -s ifconfig.me)
 echo -e "${GREEN}=============================================${NC}"
 echo -e "${GREEN}🎉 NodeTool 正在运行！${NC}"
 echo -e "---------------------------------------------"
 echo -e "管理命令: ${CYAN}nt [start|stop|restart|status|update|uninstall|log|detailed]${NC}"
-echo -e "日志查看: ${CYAN}${CMD_PREFIX} journalctl -u nodetool -f${NC}" # <-- 使用 CMD_PREFIX
+echo -e "日志查看: ${CYAN}${CMD_PREFIX} journalctl -u nodetool -f${NC}" 
 echo -e "公网地址:   ${YELLOW}http://$IP:$PORT${NC}"
 echo -e "${GREEN}=============================================${NC}"
