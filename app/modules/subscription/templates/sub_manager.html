@@ -687,6 +687,7 @@
     
     .db-badge { font-size: 9px; background: #eee; color: #666; padding: 1px 4px; border-radius: 3px; font-weight: 700; margin-left: 5px; }
     .loc-badge { font-size: 9px; background: #e3f2fd; color: #1976d2; padding: 1px 4px; border-radius: 3px; font-weight: 700; margin-left: 5px; }
+    .sub-badge { font-size: 9px; background: #f3e5f5; color: #8e24aa; padding: 1px 4px; border-radius: 3px; font-weight: 700; margin-left: 5px; }
 
     .add-form { display: flex; flex-direction: column; gap: 12px; z-index: 1; height: 100%; }
     .form-group { display: flex; flex-direction: column; gap: 5px; }
@@ -706,9 +707,15 @@
         width: 100%;
         font-weight: 600;
         transition: background 0.2s;
-        margin-top: auto;
     }
     .btn-add-large:hover { background: #0062cc; }
+
+    .add-btn-row {
+        display: flex;
+        gap: 10px;
+        margin-top: auto;
+        width: 100%;
+    }
 
     .detail-row { margin-bottom: 0px; display: flex; flex-direction: column; gap: 4px; border-bottom: 1px solid #e1e1e1; padding-bottom: 8px; }
     .detail-row:last-child { margin-bottom: 0; border-bottom: none; padding-bottom: 0; }
@@ -967,6 +974,15 @@
 
             <div class="node-column" id="col-add" data-title="添加节点">
                 <div class="add-form">
+                    
+                    <div class="form-group">
+                        <label class="form-label">从订阅获取节点链接</label>
+                        <input type="text" id="subUrlInput" class="add-input"
+                                placeholder="粘贴 v2ray_url 订阅链接"
+                                value="{{ settings.external_sub_url }}">
+                    </div>
+                    
+                    <div style="border-bottom: 1px dashed #ddd; margin: 2px 0;"></div>
                     <div class="form-group">
                         <label class="form-label">节点名称 (同名自动合并)</label>
                         <input type="text" id="newNodeName" class="add-input">
@@ -985,8 +1001,12 @@
                         <label class="form-label">节点链接</label>
                         <textarea id="newNodeLink" class="add-input" style="flex: 1; resize: none;"></textarea>
                     </div>
-                    <button class="btn-add-large" onclick="addLocalNode()">添加 / 合并节点</button>
-                </div>
+
+                    <div class="add-btn-row">
+                        <button class="btn-add-large" onclick="addLocalNode()" style="flex: 1.5;">添加节点</button>
+                        <button class="btn-add-large" id="btnFetchSub" onclick="fetchFromSubscription()" style="flex: 1; background-color: #6c5ce7;">刷新订阅</button>
+                    </div>
+                    </div>
             </div>
 
             <div class="node-column" id="col-details" data-title="节点详情">
@@ -1291,7 +1311,9 @@
                 <span class="node-name-text" title="${node.name}">${node.name}</span>`;
         
         // 标识区分
-        if (!node.is_local) {
+        if (node.is_sub) {
+             headerContent += `<span class="sub-badge">SUB</span>`;
+        } else if (node.is_db) {
             headerContent += `<span class="db-badge">DB</span>`;
         } else {
             headerContent += `<span class="loc-badge">LOC</span>`;
@@ -1576,6 +1598,54 @@
                      btn.disabled = false;
                 }
             });
+    }
+
+    function fetchFromSubscription() {
+        const urlInput = document.getElementById('subUrlInput');
+        const url = urlInput.value.trim();
+        
+        if (!url) {
+            showToast('⚠️ 请先输入订阅链接', 'error');
+            return;
+        }
+
+        const btn = document.getElementById('btnFetchSub');
+        const originalText = btn.innerText;
+        btn.innerText = '获取中...';
+        btn.disabled = true;
+
+        // 注意：这里指向的后端 API 需要在下一步中实现
+        // 建议后端路由命名为: /api/local_nodes/fetch_from_sub
+        // 参数: { url: url }
+        // 成功返回: { status: 'success', message: '成功获取 N 个节点' }
+        fetch("{{ url_for('subscription.add_local_node_api') }}".replace('add', 'fetch_from_sub'), { 
+            // 👆 这里临时用 replace 构造一个预期的 URL，实际后端实现时需要新增此路由
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url: url })
+        })
+        .then(r => {
+             if (!r.ok) throw new Error('网络请求失败或接口未实现');
+             return r.json();
+        })
+        .then(res => {
+            if (res.status === 'success') {
+                showToast(res.message);
+                urlInput.value = ''; // 清空输入框
+                fetchNodes();      // 刷新列表
+                refreshStats();    // 刷新统计
+            } else {
+                showToast('❌ 获取失败: ' + res.message, 'error');
+            }
+        })
+        .catch(err => {
+            showToast('❌ 请求出错: 接口可能尚未实现', 'error');
+            console.error(err);
+        })
+        .finally(() => {
+            btn.innerText = originalText;
+            btn.disabled = false;
+        });
     }
 
     function addLocalNode() {

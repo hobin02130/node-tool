@@ -7,6 +7,7 @@ from app.utils.db_manager import get_all_nodes, update_node_details, get_config,
 import os
 import sys         # 用于判断打包环境
 import shutil      # 用于复制文件恢复模板
+import requests    # 用于下载订阅
 from app.utils.path_helper import get_external_config_path # 引入创建的路径处理工具
 import json
 import base64
@@ -16,7 +17,7 @@ import uuid
 from io import BytesIO
 
 from ruamel.yaml import YAML
-from .link_parser import parse_proxy_link, get_emoji_flag
+from .link_parser import parse_proxy_link, get_emoji_flag, extract_nodes_from_content
 
 bp = Blueprint('subscription', __name__, url_prefix='/subscription', template_folder='templates')
 
@@ -62,7 +63,7 @@ def check_and_restore_templates(target_dir):
                     print(f"[Error] Failed to restore {filename}: {e}")
 
 # ---------------------------------------------------------
-# 修改后的主路径函数
+# 主路径函数
 # ---------------------------------------------------------
 def get_nodes_dir():
     """
@@ -195,7 +196,7 @@ def merge_db_to_local_json():
             continue 
             
         if not is_db_node:
-            if node.get('origin') != 'local':
+            if node.get('origin') not in ['local', 'sub']:
                 node['origin'] = 'local'
                 node['is_fixed'] = False 
                 has_changes = True
@@ -235,12 +236,19 @@ def sync_nodes_to_files():
         
         for proto, link in links.items():
             if link and link.strip():
-                # --- [核心修改] 命名格式强制调整 ---
+                # 命名格式强制调整
                 # 1. 确定国旗
-                flag = get_emoji_flag(region) if origin == 'db' else '📝'
+                # 增加对 'sub' (外部订阅) 的判断，显示云朵图标
+                if origin == 'db':
+                    flag = get_emoji_flag(region)
+                elif origin == 'sub':
+                    flag = ''  # 外部订阅不显示国旗或标志，保留原始名称
+                else:
+                    flag = '📝' # 本地手填标志
                 
                 # 2. 构造强制名称：Flag Protocol-Name (例如: 🇸🇬 hy2-SG-NAT1)
                 # proto.lower() 确保协议名为小写
+                # 外部订阅节点不强制添加前缀
                 display_name = f"{flag} {proto.lower()}-{node_name}".strip()
                 
                 # 3. 调用解析器
@@ -315,7 +323,8 @@ def get_stats_data():
 def get_sub_settings():
     return {
         'fixed_domain': get_config('fixed_domain', default=''),
-        'api_token': get_config('api_token', default='default')
+        'api_token': get_config('api_token', default='default'),
+        'external_sub_url': get_config('external_sub_url', default='')
     }
 
 def verify_request_token():
@@ -369,6 +378,10 @@ def update_settings_api():
         if set_config('fixed_domain', domain, description='订阅管理-固定域名'): is_saved = True
     if 'api_token' in data:
         if set_config('api_token', data.get('api_token', '').strip(), description='订阅管理-安全Token'): is_saved = True
+    # 增加 external_sub_url 的保存逻辑
+    if 'sub_url' in data:
+        if set_config('external_sub_url', data.get('sub_url', '').strip(), description='节点管理-外部订阅'): 
+            is_saved = True
     return jsonify({'status': 'success' if is_saved else 'error', 'message': '设置已保存' if is_saved else '保存失败'})
 
 @bp.route('/api/token/refresh', methods=['POST'])
@@ -474,10 +487,104 @@ def get_nodes_list_api():
             # is_db 字段方便前端判断图标
             node['is_db'] = (node.get('origin') == 'db')
             node['is_local'] = (node.get('origin') == 'local')
+            node['is_sub'] = (node.get('origin') == 'sub')
             # 协议列表
             node['protocols'] = list(node.get('links', {}).keys())
             
         return jsonify({'status': 'success', 'nodes': nodes})
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+# ---------------------------------------------------------
+# 从订阅获取节点并保存到 local_nodes.json
+# ---------------------------------------------------------
+@bp.route('/api/local_nodes/fetch_from_sub', methods=['POST'])
+@login_required
+def fetch_from_sub_api():
+    """
+    API: 从外部订阅下载并解析节点
+    1. 保存订阅链接到 DB
+    2. 下载并解析内容
+    3. 更新/合并到 local_nodes.json (origin='sub')
+    4. 自动清理订阅中已失效的节点
+    """
+    try:
+        data = request.get_json()
+        url = data.get('url', '').strip()
+        
+        if not url: return jsonify({'status': 'error', 'message': 'URL 不能为空'}), 400
+
+        # 1. 存入数据库 (记录最后一次使用的订阅)
+        set_config('external_sub_url', url, description='节点管理-外部订阅')
+
+        # 2. 下载内容
+        try:
+            resp = requests.get(url, timeout=15, headers={'User-Agent': 'v2rayN/6.0'})
+            resp.raise_for_status()
+            content = resp.text
+        except Exception as e:
+            return jsonify({'status': 'error', 'message': f'下载失败: {str(e)}'}), 500
+
+        # 3. 解析内容
+        extracted_nodes = extract_nodes_from_content(content)
+        if not extracted_nodes:
+            return jsonify({'status': 'error', 'message': '订阅内容为空或无法解析'}), 400
+
+        # 4. 读取现有节点
+        local_nodes = load_local_nodes_raw()
+        new_node_names = set()
+        sub_node_map = {n['name']: n for n in local_nodes if n.get('origin') == 'sub'}
+
+        count_new = 0
+        count_updated = 0
+
+        for item in extracted_nodes:
+            name = item['name']
+            proto = item['protocol']
+            link = item['link']
+            
+            new_node_names.add(name) # 标记此节点存在于新订阅中
+            
+            if name in sub_node_map:
+                # 仅更新链接和协议，保留 uuid, routing_type, sort_index
+                target = sub_node_map[name]
+                target.setdefault('links', {})[proto] = link
+                count_updated += 1
+            else:
+                new_node = {
+                    "uuid": str(uuid.uuid4()),
+                    "name": name,
+                    "links": {proto: link},
+                    "routing_type": -1, # 默认作为屏蔽节点，防止订阅轰炸首页
+                    "origin": "sub",   # 核心标志
+                    "is_fixed": False,
+                    "sort_index": 99999
+                }
+                local_nodes.append(new_node)
+                # 更新 map 防止同名重复插入
+                sub_node_map[name] = new_node
+                count_new += 1
+
+        initial_count = len(local_nodes)
+        local_nodes = [
+            n for n in local_nodes 
+            if not (n.get('origin') == 'sub' and n['name'] not in new_node_names)
+        ]
+        count_deleted = initial_count - len(local_nodes)
+
+        save_local_nodes(local_nodes)
+        sync_nodes_to_files()
+
+        msg = f'同步完成：新增 {count_new}，更新 {count_updated}'
+        if count_deleted > 0:
+            msg += f'，清理失效 {count_deleted}'
+
+        return jsonify({
+            'status': 'success', 
+            'message': msg
+        })
+
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
@@ -502,7 +609,7 @@ def add_local_node_api():
                 "uuid": str(uuid.uuid4()),
                 "name": name,
                 "links": {proto: link},
-                "routing_type": -1, # 默认屏蔽
+                "routing_type": 1, # 默认直连
                 "origin": "local",
                 "is_fixed": False,
                 "sort_index": 99999
@@ -685,7 +792,13 @@ def download_v2ray_base64():
         origin = node.get('origin', 'local')
         region = node.get('region', 'LOC')
         
-        flag = get_emoji_flag(region) if origin == 'db' else '📝'
+        # 增加对类型的图标判断
+        if origin == 'db':
+            flag = get_emoji_flag(region)
+        elif origin == 'sub':
+            flag = '' # 外部订阅不显示国旗或标志
+        else:
+            flag = '📝'
         
         for proto, link in links_dict.items():
             if link and link.strip():

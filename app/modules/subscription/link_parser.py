@@ -125,6 +125,62 @@ def parse_proxy_link(link, base_name, region_code):
             return proxy
         
         # ===========================
+        # VMess 解析逻辑
+        # ===========================
+        elif link.startswith('vmess://'):
+            try:
+                b64_part = link[8:]
+                decoded = safe_base64_decode(b64_part)
+                if not decoded: return None
+                
+                # VMess 链接通常是 JSON 格式
+                v_data = json.loads(decoded)
+                
+                proxy = {
+                    "name": proxy_name,
+                    "type": "vmess",
+                    "server": v_data.get('add'),
+                    "port": int(v_data.get('port')),
+                    "uuid": v_data.get('id'),
+                    "alterId": int(v_data.get('aid', 0)),
+                    "cipher": "auto",
+                    "tls": False,
+                    "udp": True,
+                    "skip-cert-verify": True
+                }
+                
+                # 传输方式
+                net = v_data.get('net', 'tcp')
+                proxy['network'] = net
+                
+                # TLS 设置
+                if v_data.get('tls') in ['tls', True, 'true']:
+                    proxy['tls'] = True
+                    if v_data.get('sni'):
+                        proxy['servername'] = v_data.get('sni')
+                
+                # WebSocket 设置
+                if net == 'ws':
+                    ws_opts = {}
+                    if v_data.get('path'):
+                        ws_opts['path'] = v_data.get('path')
+                    if v_data.get('host'):
+                        ws_opts['headers'] = {'Host': v_data.get('host')}
+                    if ws_opts:
+                        proxy['ws-opts'] = ws_opts
+                        
+                # Grpc 设置
+                if net == 'grpc':
+                    proxy['grpc-opts'] = {
+                        'grpc-service-name': v_data.get('path', '')
+                    }
+
+                return proxy
+            except Exception as e:
+                print(f"VMess 解析错误: {e}")
+                return None
+
+        # ===========================
         # TUIC 解析逻辑 (新增)
         # 兼容 tuic://uuid:password@server:port?params 格式
         # ===========================
@@ -242,3 +298,58 @@ def parse_proxy_link(link, base_name, region_code):
         print(f"解析链接通用错误: {link[:50]}... | Error: {e}") # 打印通用错误信息
         return None
     return None
+
+# ---------------------------------------------------------
+# 从订阅内容提取节点信息 (用于保存到 local_nodes.json)
+# ---------------------------------------------------------
+def extract_nodes_from_content(content):
+    """
+    解析订阅文本（可能是 Base64 编码），提取节点基本信息。
+    返回列表: [{'name': '...', 'protocol': '...', 'link': '...'}]
+    """
+    nodes = []
+    
+    # 1. 尝试 Base64 解码
+    decoded = safe_base64_decode(content)
+    text_content = decoded if decoded else content
+    
+    # 2. 按行分割
+    lines = text_content.splitlines()
+    
+    for line in lines:
+        line = line.strip()
+        if not line: continue
+        
+        # 3. 提取协议
+        protocol = None
+        if '://' in line:
+            protocol = line.split('://')[0].lower()
+            
+        # 映射常见协议到标准简写
+        if protocol in ['hysteria2', 'hy2']: protocol = 'hy2'
+        elif protocol in ['shadowsocks']: protocol = 'ss'
+        elif protocol in ['vmess', 'VMESS']: protocol = 'vm'
+        elif protocol in ['vless', 'tuic', 'trojan', 'socks5']: pass
+        else: continue # 跳过不支持的协议
+        
+        # 4. 提取名称 (从 URL Fragment #)
+        name = "Unknown Node"
+        if '#' in line:
+            try:
+                raw_name = line.split('#')[-1]
+                name = urllib.parse.unquote(raw_name).strip()
+            except: pass
+        else:
+            # 如果没有名称，尝试用服务器地址+端口作为临时名称
+            try:
+                parsed = urllib.parse.urlparse(line)
+                name = f"{parsed.hostname}:{parsed.port}"
+            except: pass
+
+        nodes.append({
+            'name': name,
+            'protocol': protocol,
+            'link': line
+        })
+        
+    return nodes
