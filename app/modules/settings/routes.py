@@ -19,9 +19,17 @@ EST_BYTES_PER_RECORD_PSQL = 250
 MINUTES_PER_DAY = 24 * 60 
 
 # 获取 db_config.json 的绝对路径
+# --- 修改开始：增强路径获取逻辑 ---
 def get_db_config_path():
-    # 获取 db_config.json 的路径
-    return os.path.join(current_app.root_path, '..', 'db_config.json')
+    """
+    获取 db_config.json 的绝对路径。
+    优先检查 Docker 容器的标准挂载路径，防止因 root_path 偏移导致写入错误位置。
+    """
+    docker_std_path = '/app/db_config.json'
+    if os.path.exists(docker_std_path):
+        return docker_std_path
+
+    return os.path.abspath(os.path.join(current_app.root_path, '..', 'db_config.json'))
 
 # 读取数据库配置文件
 def load_db_config_file():
