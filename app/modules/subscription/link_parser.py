@@ -1,18 +1,73 @@
 import urllib.parse
 import base64
-import json 
+import json
+import re
 
-# ---------------------------------------------------------
-# 解析 netloc，解决 IPv6 无括号问题
-# ---------------------------------------------------------
+# ==============================================================================
+# SECTION 1: 基础工具函数 (Utils)
+# ==============================================================================
+
+def safe_base64_decode(s):
+    """安全 Base64 解码，自动处理 padding 和 URL Safe 字符"""
+    if not s: return None
+    s = s.strip()
+    s = s.replace('-', '+').replace('_', '/')
+    missing_padding = len(s) % 4
+    if missing_padding:
+        s += '=' * (4 - missing_padding)
+    try:
+        return base64.b64decode(s).decode('utf-8')
+    except:
+        return None
+
+def get_emoji_flag(region_code):
+    """根据地区代码获取 Emoji"""
+    if region_code: 
+        return region_code.strip()
+    return '🌐'
+
+def _get_param(params, key, default=''):
+    """获取参数的第一个值"""
+    return params.get(key, [default])[0]
+
+def _get_bool(params, keys, default=False):
+    """
+    解析布尔值，支持多个备选键名 (如 insecure, allowInsecure)
+    支持 '1', 'true', 'True' 等格式
+    """
+    if isinstance(keys, str): keys = [keys]
+    
+    val = None
+    for k in keys:
+        if k in params:
+            val = params[k][0]
+            break
+    
+    if val is None: return default
+    
+    val_str = str(val).lower()
+    return val_str in ['1', 'true', 'on', 'yes']
+
+def _get_int(params, key, default=None):
+    """安全解析整数"""
+    val = _get_param(params, key)
+    try:
+        return int(val)
+    except:
+        return default
+
+def _get_list(params, key, sep=','):
+    """解析列表字符串 (如 alpn=h3,h2)"""
+    val = _get_param(params, key)
+    if not val: return None
+    return [x.strip() for x in val.split(sep) if x.strip()]
+
 def parse_netloc_manual(netloc, default_port=443):
     """
-    手动解析 userinfo@host:port
-    针对 vless://uuid@ipv6:port 这种不规范（无括号）链接进行修复
-    只给 server 加括号，不影响 sni
+    [核心工具] 手动解析 userinfo@host:port
+    解决 Python 标准库无法正确解析不带 [] 的 IPv6 地址的问题
     """
     userinfo = ""
-    # 1. 分离用户信息 (从右向左切，防止密码里有 @)
     if '@' in netloc:
         userinfo, host_part = netloc.rsplit('@', 1)
     else:
@@ -21,31 +76,27 @@ def parse_netloc_manual(netloc, default_port=443):
     server = host_part
     port = default_port
 
-    # 2. 识别 Host 和 Port
-    # 情况 A: [IPv6]:port 或 [IPv6] (已有括号，保持原样)
+    # 情况 A: [IPv6]:port 或 [IPv6]
     if '[' in host_part and ']' in host_part:
-        if ']:' in host_part: # [IPv6]:port
+        if ']:' in host_part:
             try:
                 server, port_str = host_part.rsplit(':', 1)
                 port = int(port_str)
             except ValueError:
-                # 应对异常情况，回退到默认
                 server = host_part
-        else: # [IPv6]
+        else:
             server = host_part
     
-    # 情况 B: IPv6:port (无括号，多个冒号，且最后一部分是数字)
+    # 情况 B: IPv6:port (无括号)
     elif host_part.count(':') >= 2:
-        # 尝试将最后一部分当作端口
         possible_host, possible_port = host_part.rsplit(':', 1)
-        if possible_port.isdigit(): # 如果最后一部分全是数字，认为是端口
-            server = f'[{possible_host}]' # 给 Server 加上括号
+        if possible_port.isdigit():
+            server = f'[{possible_host}]'
             port = int(possible_port)
         else:
-            # 纯 IPv6 无端口
-            server = f'[{host_part}]' # 给 Server 加上括号
+            server = f'[{host_part}]'
 
-    # 情况 C: domain:port 或 ipv4:port (只有一个冒号)
+    # 情况 C: domain:port 或 ipv4:port
     elif ':' in host_part:
         try:
             server, port_str = host_part.rsplit(':', 1)
@@ -53,357 +104,490 @@ def parse_netloc_manual(netloc, default_port=443):
         except ValueError:
             server = host_part
     
-    # 情况 D: 纯域名 (不加括号)
-    else:
-        server = host_part
-
     return userinfo, server, port
 
-# ---------------------------------------------------------
-# IPv6 格式标准化修复工具
-# ---------------------------------------------------------
 def fix_link_ipv6(link):
-    """
-    [核心修复] 强制标准化链接中的 IPv6 格式
-    如果链接中的 IPv6 缺少 []，自动补全。
-    适用于 Base64 订阅导出和前端展示。
-    """
+    """[链接修复] 强制标准化链接中的 IPv6 格式"""
     if not link: return link
     link = link.strip()
 
-    # 1. 处理 VMess (Base64 JSON 特殊格式)
+    # 1. VMess 特殊处理
     if link.lower().startswith('vmess://'):
         try:
             b64_part = link[8:]
             decoded = safe_base64_decode(b64_part)
             if not decoded: return link
-            
             v_data = json.loads(decoded)
             addr = v_data.get('add', '')
-            
-            # 检查地址是否为 IPv6 且无括号
             if addr and ':' in addr and not addr.startswith('['):
                 v_data['add'] = f"[{addr}]"
-                # 重新封装为 Base64
                 new_b64 = base64.b64encode(json.dumps(v_data).encode('utf-8')).decode('utf-8')
                 return f"vmess://{new_b64}"
             return link
         except:
-            # 如果解析失败，原样返回，不破坏数据
             return link
 
-    # 2. 处理标准 URL (vless, hy2, tuic, ss 等)
+    # 2. 通用 URL 处理
     try:
-        # 解析 URL
         parsed = urllib.parse.urlparse(link)
         if not parsed.netloc: return link
-        
-        # 利用 parse_netloc_manual 的智能逻辑提取正确的 server (它会自动给 IPv6 加括号)
-        # 默认端口给 443 即可，只为了触发解析逻辑
         userinfo, server, port = parse_netloc_manual(parsed.netloc, 443)
-        
-        # 重新组装 netloc
         new_netloc = ""
-        if userinfo:
-            new_netloc += f"{userinfo}@"
-        
-        # 这里的 server 已经是带 [] 的标准格式了
+        if userinfo: new_netloc += f"{userinfo}@"
         new_netloc += f"{server}:{port}"
-        
-        # 替换 netloc 并生成新链接
         new_parsed = parsed._replace(netloc=new_netloc)
         return urllib.parse.urlunparse(new_parsed)
-        
-    except Exception:
-        # 如果解析出错，为了安全起见返回原链接
+    except:
         return link
 
-# ---------------------------------------------------------
-# 1. 辅助工具函数
-# ---------------------------------------------------------
-def get_emoji_flag(region_code):
-    if region_code: 
-        return region_code.strip()
-    return '🌐'
+# ==============================================================================
+# SECTION 2: 独立协议处理器 (Protocol Handlers)
+# ==============================================================================
 
-def safe_base64_decode(s):
-    if not s: return None
-    s = s.strip()
-    # 补全 padding
-    missing_padding = len(s) % 4
-    if missing_padding:
-        s += '=' * (4 - missing_padding)
+def _parse_hysteria2(parsed, params, proxy_name):
+    """
+    处理 Hysteria2 / Hy2 协议
+    """
+    userinfo, server, port = parse_netloc_manual(parsed.netloc, 443)
+    
+    password = parsed.username if parsed.username else parsed.password
+    if userinfo: password = urllib.parse.unquote(userinfo)
+    
+    # 兼容非常规格式 (hy2://pass@host)
+    if not password and not userinfo and '@' in parsed.netloc:
+            try:
+                raw_userinfo, _ = parsed.netloc.rsplit('@', 1)
+                password = urllib.parse.unquote(raw_userinfo)
+            except: pass
+    
+    # 如果 URL 没密码，尝试 auth 参数
+    if not password:
+        password = _get_param(params, 'auth')
+
+    proxy = {
+        "name": proxy_name,
+        "type": "hysteria2",
+        "server": server,
+        "port": port,
+        "password": password,
+        "sni": _get_param(params, 'sni', _get_param(params, 'peer')),
+        "skip-cert-verify": _get_bool(params, ['insecure', 'skip-cert-verify', 'allowInsecure']),
+        "udp": True
+    }
+    
+    # ALPN
+    alpn = _get_list(params, 'alpn')
+    if alpn: proxy['alpn'] = alpn
+
+    # Obfs
+    if _get_param(params, 'obfs'):
+        proxy['obfs'] = _get_param(params, 'obfs')
+        proxy['obfs-password'] = _get_param(params, 'obfs-password')
+
+    # Bandwidth (参考 JS: up ?? upmbps)
+    up = _get_int(params, 'up') or _get_int(params, 'upmbps')
+    down = _get_int(params, 'down') or _get_int(params, 'downmbps')
+    if up: proxy['up'] = up
+    if down: proxy['down'] = down
+
+    # Advanced params
+    if _get_param(params, 'ports'):
+        proxy['ports'] = _get_param(params, 'ports')
+    
+    if _get_param(params, 'hop-interval'):
+        proxy['hop-interval'] = _get_int(params, 'hop-interval')
+
+    return proxy
+
+def _parse_vless(parsed, params, proxy_name):
+    """
+    处理 VLESS 协议
+    """
+    userinfo, server, port = parse_netloc_manual(parsed.netloc, 443)
+    
+    uuid_str = parsed.username
+    if userinfo: uuid_str = urllib.parse.unquote(userinfo)
+    elif uuid_str: uuid_str = urllib.parse.unquote(uuid_str)
+
+    network = _get_param(params, 'type', 'tcp')
+    security = _get_param(params, 'security', 'none')
+    
+    proxy = {
+        "name": proxy_name,
+        "type": "vless",
+        "server": server,
+        "port": port,
+        "uuid": uuid_str,
+        "network": network,
+        "udp": True,
+        "tfo": _get_bool(params, 'fast-open'),
+        "skip-cert-verify": _get_bool(params, ['insecure', 'skip-cert-verify']),
+        "servername": _get_param(params, 'sni')
+    }
+    
+    # Flow
+    flow = _get_param(params, 'flow')
+    if flow: proxy['flow'] = flow
+
+    # ALPN
+    alpn = _get_list(params, 'alpn')
+    if alpn: proxy['alpn'] = alpn
+
+    # Packet Encoding
+    pkt_encoding = _get_param(params, 'packet_encoding') or _get_param(params, 'packet-encoding')
+    if pkt_encoding: proxy['packet-encoding'] = pkt_encoding
+
+    # TLS / Reality
+    if security == 'reality':
+        proxy['tls'] = True
+        proxy['reality-opts'] = {
+            "public-key": _get_param(params, 'pbk'),
+            "short-id": _get_param(params, 'sid')
+        }
+        fp = _get_param(params, 'fp')
+        proxy['client-fingerprint'] = fp if fp else 'chrome'
+        
+    elif security == 'tls' or _get_bool(params, 'tls'):
+        proxy['tls'] = True
+        fp = _get_param(params, 'fp')
+        if fp: proxy['client-fingerprint'] = fp
+    
+    # Transport Options (ws, grpc, http/h2)
+    if network == 'ws':
+        proxy['ws-opts'] = {
+            "path": _get_param(params, 'path', '/'),
+            "headers": {}
+        }
+        host = _get_param(params, 'host')
+        if host: proxy['ws-opts']['headers']['Host'] = host
+    
+    elif network == 'grpc':
+        proxy['grpc-opts'] = {
+            "grpc-service-name": _get_param(params, 'serviceName', '')
+        }
+    
+    elif network == 'h2': # HTTP/2
+        proxy['h2-opts'] = {
+            "path": _get_param(params, 'path', '/').split(','),
+            "host": _get_list(params, 'host')
+        }
+
+    elif network == 'http': # HTTPUpgrade (TCP+HTTP伪装)
+        proxy['http-opts'] = {
+            "method": "GET",
+            "path": _get_param(params, 'path', '/').split(','),
+        }
+        headers = {}
+        host = _get_param(params, 'host')
+        if host: headers['Host'] = host.split(',')
+        if headers: proxy['http-opts']['headers'] = headers
+
+    return proxy
+
+def _parse_trojan(parsed, params, proxy_name):
+    """
+    处理 Trojan 协议
+    """
+    userinfo, server, port = parse_netloc_manual(parsed.netloc, 443)
+    
+    password = parsed.username
+    if userinfo: password = urllib.parse.unquote(userinfo)
+    elif password: password = urllib.parse.unquote(password)
+
+    # Trojan 的参数逻辑与 VLESS 高度相似
+    network = _get_param(params, 'type', 'tcp')
+    security = _get_param(params, 'security', 'tls') # Trojan 默认通常是 TLS
+    
+    proxy = {
+        "name": proxy_name,
+        "type": "trojan",
+        "server": server,
+        "port": port,
+        "password": password,
+        "network": network,
+        "udp": True,
+        "tfo": _get_bool(params, 'fast-open'),
+        "skip-cert-verify": _get_bool(params, ['insecure', 'skip-cert-verify']),
+        "sni": _get_param(params, 'sni')
+    }
+
+    # ALPN
+    alpn = _get_list(params, 'alpn')
+    if alpn: proxy['alpn'] = alpn
+    
+    # Client Fingerprint (JS: tls.utls.fingerprint)
+    fp = _get_param(params, 'fp')
+    if fp: proxy['client-fingerprint'] = fp
+    
+    # Reality (虽然 Trojan 较少用 Reality，但 JS 代码里有支持)
+    if security == 'reality':
+        proxy['reality-opts'] = {
+            "public-key": _get_param(params, 'pbk'),
+            "short-id": _get_param(params, 'sid')
+        }
+
+    # Transport Options (ws, grpc)
+    if network == 'ws':
+        proxy['ws-opts'] = {
+            "path": _get_param(params, 'path', '/'),
+            "headers": {}
+        }
+        host = _get_param(params, 'host')
+        if host: proxy['ws-opts']['headers']['Host'] = host
+    
+    elif network == 'grpc':
+        proxy['grpc-opts'] = {
+            "grpc-service-name": _get_param(params, 'serviceName', '')
+        }
+
+    return proxy
+
+def _parse_tuic(parsed, params, proxy_name):
+    """
+    处理 TUIC 协议
+    """
+    userinfo_str, server, port = parse_netloc_manual(parsed.netloc, 443)
+    
+    uuid_str = ""
+    password = ""
+    if userinfo_str:
+        if ':' in userinfo_str:
+            uuid_raw, pass_raw = userinfo_str.split(':', 1)
+            uuid_str = urllib.parse.unquote(uuid_raw)
+            password = urllib.parse.unquote(pass_raw)
+        else:
+            uuid_str = urllib.parse.unquote(userinfo_str)
+    if not password: password = parsed.password
+
+    proxy = {
+        "name": proxy_name,
+        "type": "tuic",
+        "server": server,
+        "port": port,
+        "uuid": uuid_str,
+        "password": password,
+        "tls": True,
+        "udp": True,
+        "disable-sni": _get_bool(params, 'disable-sni'),
+        "skip-cert-verify": _get_bool(params, ['insecure', 'skip-cert-verify', 'allowInsecure']),
+        "congestion-controller": _get_param(params, 'congestion_controller', 'bbr'),
+        "udp-relay-mode": _get_param(params, 'udp-relay-mode', 'native'),
+        "reduce-rtt": _get_bool(params, 'reduce-rtt'),
+        "zero-rtt": _get_bool(params, 'zero-rtt')
+    }
+    
+    alpn = _get_list(params, 'alpn')
+    if alpn: proxy['alpn'] = alpn
+    else: proxy['alpn'] = ['h3']
+
+    if _get_param(params, 'sni'):
+        proxy['servername'] = _get_param(params, 'sni')
+
+    return proxy
+
+def _parse_vmess(link, proxy_name):
+    """
+    处理 VMess 协议 (基于 Base64 JSON)
+    """
     try:
-        return base64.urlsafe_b64decode(s).decode('utf-8')
-    except:
-        try:
-            return base64.b64decode(s).decode('utf-8')
-        except:
-            return None
+        b64_part = link[8:]
+        # 支持 vmess://BASE64#Name 格式
+        if '#' in b64_part:
+            b64_part = b64_part.split('#')[0]
 
-# ---------------------------------------------------------
-# 2. 核心：解析原始链接为 Clash Meta 字典格式
-# ---------------------------------------------------------
+        decoded = safe_base64_decode(b64_part)
+        if not decoded: return None
+        
+        v = json.loads(decoded)
+        
+        server_addr = v.get('add')
+        # IPv6 格式修复
+        if server_addr and ':' in server_addr and not server_addr.startswith('['):
+            server_addr = f'[{server_addr}]'
+
+        # 基础配置
+        proxy = {
+            "name": proxy_name,
+            "type": "vmess",
+            "server": server_addr,
+            "port": int(v.get('port', 443)),
+            "uuid": v.get('id'),
+            "alterId": int(v.get('aid', 0)),
+            "cipher": v.get('scy', 'auto'),
+            "udp": True,
+            "skip-cert-verify": False,
+            "tls": False
+        }
+
+        # TLS 判断
+        tls_val = v.get('tls', '')
+        if tls_val and str(tls_val).lower() != 'none':
+            proxy['tls'] = True
+            proxy['servername'] = v.get('sni', '')
+            # 兼容 skip-cert-verify
+            if v.get('skip-cert-verify') or v.get('insecure'):
+                 proxy['skip-cert-verify'] = True
+
+        # Network / Transport 解析
+        net = v.get('net', 'tcp')
+        type_field = v.get('type', net) # 有些链接用 type 表示伪装类型
+
+        proxy['network'] = net
+        
+        # 1. WebSocket
+        if net == 'ws':
+            proxy['ws-opts'] = {
+                "path": v.get('path', '/'),
+                "headers": {}
+            }
+            # Host 优先级: host > sni
+            host = v.get('host')
+            if not host and v.get('sni'): host = v.get('sni')
+            if host: proxy['ws-opts']['headers']['Host'] = host
+            
+        # 2. HTTP (TCP + HTTP伪装)
+        elif net == 'http' or (net == 'tcp' and type_field == 'http'):
+            proxy['network'] = 'http'
+            http_opts = {
+                "method": "GET",
+                "path": [v.get('path', '/')]
+            }
+            # 处理 Headers
+            headers = {}
+            host = v.get('host')
+            if host: headers['Host'] = [host] # Clash Meta要求Host是列表
+            if headers: http_opts['headers'] = headers
+            proxy['http-opts'] = http_opts
+
+        # 3. gRPC
+        elif net == 'grpc':
+            proxy['grpc-opts'] = {
+                'grpc-service-name': v.get('path', '') or v.get('serviceName', '')
+            }
+
+        # 4. H2 (HTTP/2)
+        elif net == 'h2':
+             proxy['h2-opts'] = {
+                 "path": [v.get('path', '/')],
+                 "host": [v.get('host', '')]
+             }
+
+        # Packet Encoding
+        if v.get('packet_encoding') or v.get('packet-encoding'):
+            proxy['packet-encoding'] = v.get('packet_encoding') or v.get('packet-encoding')
+
+        return proxy
+    except Exception as e:
+        print(f"VMess Parsing Error: {e}")
+        return None
+
+def _parse_ss(link, proxy_name, params=None):
+    """处理 Shadowsocks 协议"""
+    try:
+        body = link[5:]
+        if '#' in body: body, _ = body.split('#', 1)
+
+        if '@' not in body:
+            decoded = safe_base64_decode(body)
+            if decoded: body = decoded
+        
+        if '@' in body:
+            userinfo_part, host_part = body.rsplit('@', 1)
+            
+            if ':' not in userinfo_part:
+                decoded_user = safe_base64_decode(userinfo_part)
+                if decoded_user: userinfo_part = decoded_user
+            
+            if ':' in userinfo_part:
+                method, password = userinfo_part.split(':', 1)
+                server, port = host_part.rsplit(':', 1)
+                
+                if ':' in server and not (server.startswith('[') and server.endswith(']')):
+                    server = f'[{server}]'
+                
+                proxy = {
+                    "name": proxy_name,
+                    "type": "ss",
+                    "server": server,
+                    "port": int(port),
+                    "cipher": method,
+                    "password": password,
+                    "udp": True,
+                    "tfo": _get_bool(params, 'fast-open') if params else False
+                }
+                
+                if params and _get_param(params, 'plugin'):
+                    proxy['plugin'] = _get_param(params, 'plugin')
+                    proxy['plugin-opts'] = {}
+                    opts = _get_param(params, 'plugin_opts')
+                    if opts:
+                        try:
+                            proxy['plugin-opts'] = json.loads(opts)
+                        except:
+                            proxy['plugin-opts'] = {"options": opts}
+                return proxy
+    except Exception as e:
+        print(f"SS Parsing Error: {e}")
+        return None
+    return None
+
+# ==============================================================================
+# SECTION 3: 主分发入口 (Main Entry Point)
+# ==============================================================================
+
 def parse_proxy_link(link, base_name, region_code):
     """
-    解析各种协议链接 (Hysteria2, VLESS, SS, TUIC) 并转换为 Clash Meta 配置字典
+    [主函数] 解析各种协议链接并转换为 Clash Meta 配置字典
+    路由文件 (routes.py) 调用此函数。
     """
     try:
-        # 预处理
         link = link.strip()
-        parsed = urllib.parse.urlparse(link)
-        params = urllib.parse.parse_qs(parsed.query)
         
-        # 构造节点名称
+        # 1. 构造标准名称
         flag = get_emoji_flag(region_code)
         clean_name = base_name.replace(flag, '').strip()
         proxy_name = f"{flag} {clean_name}"
 
-        # ===========================
-        # Hysteria2 解析逻辑
-        # ===========================
-        if link.startswith('hy2://') or link.startswith('hysteria2://'):
-            userinfo, server, port = parse_netloc_manual(parsed.netloc, 443)
-            
-            password = parsed.username if parsed.username else parsed.password
-            # 如果 manual 解析提取出了 userinfo，优先使用
-            if userinfo:
-                password = urllib.parse.unquote(userinfo)
-            
-            # 兼容 hy2://password@host 格式
-            if not password and not userinfo and '@' in parsed.netloc:
-                 try:
-                     raw_userinfo, _ = parsed.netloc.rsplit('@', 1)
-                     password = urllib.parse.unquote(raw_userinfo)
-                 except: pass
+        # 2. 协议分发
+        lower_link = link.lower()
 
-            proxy = {
-                "name": proxy_name,
-                "type": "hysteria2",
-                "server": server,
-                "port": port,
-                "password": password,
-                "sni": params.get('sni', [''])[0],
-                "skip-cert-verify": True,
-                "udp": True
-            }
-            
-            alpn_str = params.get('alpn', [''])[0]
-            proxy['alpn'] = alpn_str.split(',') if alpn_str else ['h3']
+        # [特殊处理] VMess
+        if lower_link.startswith('vmess://'):
+            return _parse_vmess(link, proxy_name)
 
-            if params.get('obfs'):
-                proxy['obfs'] = params.get('obfs')[0]
-                proxy['obfs-password'] = params.get('obfs-password', [''])[0]
+        # [标准 URL 协议] 解析 URL 和参数
+        parsed = urllib.parse.urlparse(link)
+        params = urllib.parse.parse_qs(parsed.query)
 
-            return proxy
-
-        # ===========================
-        # VLESS (Reality) 解析逻辑
-        # ===========================
-        elif link.startswith('vless://'):
-            userinfo, server, port = parse_netloc_manual(parsed.netloc, 443)
-            
-            uuid_str = ""
-            if userinfo:
-                uuid_str = urllib.parse.unquote(userinfo)
-            else:
-                uuid_str = parsed.username
-                if uuid_str: uuid_str = urllib.parse.unquote(uuid_str)
-
-            network = params.get('type', ['tcp'])[0]
-            servername = params.get('sni', [''])[0]
-            fingerprint = params.get('fp', ['chrome'])[0]
-            flow = params.get('flow', [''])[0]
-
-            proxy = {
-                "name": proxy_name,
-                "type": "vless",
-                "server": server,
-                "port": port,
-                "uuid": uuid_str,
-                "network": network,
-                "tls": True,
-                "udp": True,
-                "servername": servername,
-                "client-fingerprint": fingerprint
-            }
-            if flow: proxy['flow'] = flow
-            if params.get('security', [''])[0] == 'reality':
-                proxy['reality-opts'] = {
-                    "public-key": params.get('pbk', [''])[0],
-                    "short-id": params.get('sid', [''])[0]
-                }
-            return proxy
+        if lower_link.startswith('vless://'):
+            return _parse_vless(parsed, params, proxy_name)
         
-        # ===========================
-        # VMess 解析逻辑
-        # ===========================
-        elif link.startswith('vmess://'):
-            try:
-                b64_part = link[8:]
-                decoded = safe_base64_decode(b64_part)
-                if not decoded: return None
-                
-                v_data = json.loads(decoded)
-                
-                server_addr = v_data.get('add')
-                # 如果地址包含冒号(IPv6) 且 两边没有 [], 加上 []
-                if server_addr and ':' in server_addr and not server_addr.startswith('['):
-                    server_addr = f'[{server_addr}]'
-
-                proxy = {
-                    "name": proxy_name,
-                    "type": "vmess",
-                    "server": server_addr,
-                    "port": int(v_data.get('port')),
-                    "uuid": v_data.get('id'),
-                    "alterId": int(v_data.get('aid', 0)),
-                    "cipher": "auto",
-                    "tls": False,
-                    "udp": True,
-                    "skip-cert-verify": True
-                }
-                
-                # 传输方式
-                net = v_data.get('net', 'tcp')
-                proxy['network'] = net
-                
-                # TLS 设置
-                if v_data.get('tls') in ['tls', True, 'true']:
-                    proxy['tls'] = True
-                    if v_data.get('sni'):
-                        proxy['servername'] = v_data.get('sni')
-                
-                # WebSocket 设置
-                if net == 'ws':
-                    ws_opts = {}
-                    if v_data.get('path'):
-                        ws_opts['path'] = v_data.get('path')
-                    if v_data.get('host'):
-                        ws_opts['headers'] = {'Host': v_data.get('host')}
-                    if ws_opts:
-                        proxy['ws-opts'] = ws_opts
-                        
-                # Grpc 设置
-                if net == 'grpc':
-                    proxy['grpc-opts'] = {
-                        'grpc-service-name': v_data.get('path', '')
-                    }
-
-                return proxy
-            except Exception as e:
-                print(f"VMess 解析错误: {e}")
-                return None
-
-        # ===========================
-        # TUIC 解析逻辑
-        # ===========================
-        elif link.startswith('tuic://'):
-            userinfo_str, server, port = parse_netloc_manual(parsed.netloc, 443)
+        elif lower_link.startswith('trojan://'):
+            return _parse_trojan(parsed, params, proxy_name)
             
-            uuid_str = ""
-            password = ""
-
-            if userinfo_str:
-                if ':' in userinfo_str:
-                    uuid_raw, pass_raw = userinfo_str.split(':', 1)
-                    uuid_str = urllib.parse.unquote(uuid_raw)
-                    password = urllib.parse.unquote(pass_raw)
-                else:
-                    uuid_str = urllib.parse.unquote(userinfo_str)
+        elif lower_link.startswith(('hy2://', 'hysteria2://')):
+            return _parse_hysteria2(parsed, params, proxy_name)
             
-            if not password:
-                password = parsed.password
-
-            proxy = {
-                "name": proxy_name,
-                "type": "tuic",
-                "server": server,
-                "port": port,
-                "uuid": uuid_str,
-                "password": password,
-                "tls": True,
-                "udp": True,
-                "disable_sni": params.get('allow_insecure', ['0'])[0] == '1',
-                "alpn": params.get('alpn', ['h3'])[0].split(','),
-                "congestion_controller": params.get('congestion_controller', ['bbr'])[0],
-                "zero_rtt": params.get('zero_rtt', ['0'])[0] == '1'
-            }
+        elif lower_link.startswith('tuic://'):
+            return _parse_tuic(parsed, params, proxy_name)
             
-            if params.get('sni'):
-                proxy['servername'] = params.get('sni')[0]
-            if params.get('host'):
-                proxy['host'] = params.get('host')[0]
-            
-            if params.get('insecure', ['0'])[0] == '1':
-                proxy['skip-cert-verify'] = True
-
-            return proxy
-
-        # ===========================
-        # Shadowsocks (SS) 解析逻辑
-        # ===========================
-        elif link.startswith('ss://'):
-            try:
-                body = link[5:]
-                if '#' in body: body, _ = body.split('#', 1)
-
-                if '@' not in body:
-                    decoded = safe_base64_decode(body)
-                    if decoded: body = decoded
-                
-                if '@' in body:
-                    userinfo_part, host_part = body.rsplit('@', 1)
-                    
-                    if ':' not in userinfo_part:
-                        decoded_user = safe_base64_decode(userinfo_part)
-                        if decoded_user: userinfo_part = decoded_user
-                    
-                    if ':' in userinfo_part:
-                        method, password = userinfo_part.split(':', 1)
-                        server, port = host_part.rsplit(':', 1)
-                        
-                        # SS 的 IPv6 修复
-                        if ':' in server and not (server.startswith('[') and server.endswith(']')):
-                            server = f'[{server}]'
-                        
-                        proxy = {
-                            "name": proxy_name,
-                            "type": "ss",
-                            "server": server,
-                            "port": int(port),
-                            "cipher": method,
-                            "password": password,
-                            "udp": True
-                        }
-                        
-                        if params.get('plugin'):
-                            proxy['plugin'] = params.get('plugin')[0]
-                            proxy['plugin-opts'] = {}
-                            if params.get('plugin_opts'):
-                                plugin_opts_str = params.get('plugin_opts')[0]
-                                try:
-                                    proxy['plugin-opts'] = json.loads(plugin_opts_str)
-                                except json.JSONDecodeError:
-                                    proxy['plugin-opts'] = {"options": plugin_opts_str}
-
-                        return proxy
-                        
-            except Exception as ss_e:
-                print(f"SS 解析错误: {ss_e}")
-                return None
+        elif lower_link.startswith('ss://'):
+            return _parse_ss(link, proxy_name, params)
             
     except Exception as e:
-        print(f"解析链接通用错误: {link[:50]}... | Error: {e}")
+        print(f"Link Parse Error [{link[:30]}...]: {e}")
         return None
+    
     return None
 
-# ---------------------------------------------------------
-# 从订阅内容提取节点信息
-# ---------------------------------------------------------
+# ==============================================================================
+# SECTION 4: 订阅内容解析 (Subscription Helper)
+# ==============================================================================
+
 def extract_nodes_from_content(content):
     """
-    解析订阅文本，提取节点基本信息。
+    [订阅辅助] 从订阅文本（可能是 Base64 编码的）中提取每行链接
+    用于 routes.py 中的 fetch_from_sub_api
     """
     nodes = []
     
@@ -419,10 +603,10 @@ def extract_nodes_from_content(content):
         protocol = None
         if '://' in line:
             protocol = line.split('://')[0].lower()
-            
+        
         if protocol in ['hysteria2', 'hy2']: protocol = 'hy2'
         elif protocol in ['shadowsocks']: protocol = 'ss'
-        elif protocol in ['vmess', 'VMESS']: protocol = 'vm'
+        elif protocol in ['vmess', 'VMESS']: protocol = 'vmess'
         elif protocol in ['vless', 'tuic', 'trojan', 'socks5']: pass
         else: continue 
         
