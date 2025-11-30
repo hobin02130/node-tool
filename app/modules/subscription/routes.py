@@ -267,7 +267,7 @@ def sync_nodes_to_files():
     nodes_dir = get_nodes_dir()
     yaml = YAML()
     yaml.preserve_quotes = True
-    yaml.indent(mapping=2, sequence=4, offset=2)
+    yaml.indent(mapping=2, sequence=2, offset=0)
     # 4096是为了组合模板时候不被截断
     yaml.width = 4096
 
