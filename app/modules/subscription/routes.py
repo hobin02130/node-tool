@@ -398,7 +398,6 @@ def refresh_token_api():
 def download_clash_config():
     """下载 Clash 配置文件"""
     verify_request_token()
-    sync_nodes_to_files() # 触发同步
     
     try:
         base_url = get_base_url()
@@ -445,20 +444,28 @@ def download_singbox_script():
     if not os.path.exists(path): return Response("echo 'Error not found.'", mimetype='text/plain')
     with open(path, 'r', encoding='utf-8') as f: return Response(f.read(), mimetype='text/plain')
 
+
 @bp.route('/api/stats')
 @login_required
 def get_stats_api():
-    """API: 获取最新统计数据 (内部触发同步)"""
     try:
-        # 这一步会执行：DB/Local -> local_nodes.json -> 0.yaml/1.yaml
+        # 1. 触发文件同步：
+        # 此函数会执行：a) DB -> local_nodes.json (缓存)
+        #              b) local_nodes.json -> 0.yaml/1.yaml (文件生成)
         success, message = sync_nodes_to_files() 
         
-        # 即使文件同步成功或失败，我们仍然获取统计数据更新前端UI
+        # 2. 获取统计数据
         stats = get_stats_data()
         
-        # 可以在返回消息中带上同步结果，但为了兼容前端，我们只返回 stats
+        # 如果文件同步失败，返回一个警告状态，但仍带上统计信息
+        if not success:
+            return jsonify({'status': 'warning', 'message': message, 'stats': stats})
+
+        # 成功则返回状态和统计数据
         return jsonify({'status': 'success', 'stats': stats})
+        
     except Exception as e:
+        # 如果发生其他异常（例如 DB 读取错误），则返回错误
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 @bp.route('/api/sync_files', methods=['POST'])
